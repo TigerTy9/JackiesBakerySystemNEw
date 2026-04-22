@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 import database, crud, schemas, models, utils
 from auth import get_current_user, get_tenant_db, check_admin_or_owner
 from sqlalchemy import func
+from typing import List
 
 router = APIRouter(prefix="/sales", tags=["Sales"])
 
@@ -95,3 +96,26 @@ def get_bakery_finances(
         "total_waste_loss": waste_loss,
         "net_profit": net_profit
     }
+
+@router.get("/history")
+def get_transaction_history(
+    db: Session = Depends(get_tenant_db), 
+    current_user: models.User = Depends(get_current_user)
+):
+    # Join with Product table to get the name
+    transactions = db.query(
+        models.TransactionLog, 
+        models.Product.name
+    ).join(
+        models.Product, models.TransactionLog.product_id == models.Product.id
+    ).filter(
+        models.TransactionLog.tenant_id == current_user.tenant_id
+    ).order_by(models.TransactionLog.timestamp.desc()).all()
+
+    # Format the data for the frontend
+    return [{
+        "timestamp": t[0].timestamp,
+        "product_name": t[1],
+        "sale_price": t[0].sale_price,
+        "margin_fifo": t[0].margin_fifo
+    } for t in transactions]

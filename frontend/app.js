@@ -69,6 +69,7 @@ function showSection(sectionId) {
     if (sectionId === 'products') fetchProducts();
     if (sectionId === 'orders') fetchOrders();
     if (sectionId === 'finances') fetchFinances();
+    if (sectionId === 'transactions') fetchTransactionHistory();
 }
 
 async function fetchUserInfo() {
@@ -519,5 +520,24 @@ async function fetchFinances() {
         
     } catch (err) {
         console.error("Finance UI Update failed:", err);
+    }
+}
+
+async function fetchTransactionHistory() {
+    try {
+        const res = await fetch(`${API_URL}/sales/history`, { headers: getHeaders() });
+        const logs = await res.json();
+        
+        const tbody = document.getElementById('transactions-table-body');
+        tbody.innerHTML = logs.map(log => `
+            <tr class="hover:bg-gray-50">
+                <td class="p-3 border-b text-gray-500">${new Date(log.timestamp).toLocaleString()}</td>
+                <td class="p-3 border-b font-medium text-indigo-700">${log.product_name}</td>
+                <td class="p-3 border-b text-green-600 font-bold">$${log.sale_price.toFixed(2)}</td>
+                <td class="p-3 border-b text-indigo-600">$${log.margin_fifo.toFixed(2)}</td>
+            </tr>
+        `).join('');
+    } catch (err) {
+        console.error("Failed to load transactions", err);
     }
 }

@@ -38,6 +38,7 @@
                 <button onclick="showSection('products')" class="w-full text-left p-2 hover:bg-indigo-800 rounded">🥐 Products & POS</button>
                 <button onclick="showSection('orders')" class="w-full text-left p-2 hover:bg-indigo-800 rounded">📋 Custom Orders</button>
                 <button onclick="showSection('finances')" class="w-full text-left p-2 hover:bg-indigo-800 rounded">💰 Finances</button>
+                <button onclick="showSection('transactions')" class="w-full text-left p-2 hover:bg-indigo-800 rounded">📖 Ledger</button>
             </nav>
             <button onclick="logout()" class="p-4 bg-indigo-950 hover:bg-red-600 text-left font-bold">🚪 Logout</button>
         </aside>
@@ -214,6 +215,28 @@
                         <p class="text-sm text-gray-500 uppercase font-bold">Net Profit</p>
                         <p id="finance-profit" class="text-2xl font-bold text-indigo-700">$0.00</p>
                     </div>
+                </div>
+            </section>
+
+            <section id="section-transactions" class="hidden space-y-6">
+                <div class="flex justify-between items-center">
+                    <h2 class="text-3xl font-bold">Transaction Ledger</h2>
+                    <button onclick="fetchTransactionHistory()" class="bg-blue-500 text-white px-4 py-2 rounded">Refresh</button>
+                </div>
+                
+                <div class="bg-white rounded shadow overflow-hidden">
+                    <table class="w-full text-left border-collapse">
+                        <thead>
+                            <tr class="bg-gray-100 text-sm">
+                                <tr class="bg-gray-100 text-sm">
+                                    <th class="p-3 border-b">Date & Time</th>
+                                    <th class="p-3 border-b">Product Name</th> <th class="p-3 border-b">Revenue</th>
+                                    <th class="p-3 border-b">Net Margin (FIFO)</th>
+                                </tr>
+                            </tr>
+                        </thead>
+                        <tbody id="transactions-table-body" class="text-sm"></tbody>
+                    </table>
                 </div>
             </section>
         </main>
