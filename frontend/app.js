@@ -57,7 +57,7 @@ function showDashboard() {
     document.getElementById('login-view').classList.remove('flex');
     document.getElementById('dashboard-view').classList.remove('hidden');
     
-    fetchUserInfo(); // <--- ADD THIS LINE HERE
+    fetchUserInfo();
     
     showSection('inventory'); 
 }
@@ -68,6 +68,7 @@ function showSection(sectionId) {
     if (sectionId === 'inventory') fetchStockLevels();
     if (sectionId === 'products') fetchProducts();
     if (sectionId === 'orders') fetchOrders();
+    if (sectionId === 'finances') fetchFinances();
 }
 
 async function fetchUserInfo() {
@@ -496,5 +497,27 @@ async function logWaste(lotId) {
         fetchProducts(); // Refresh the POS display [cite: 254, 272]
     } catch (err) {
         alert("Error: " + (err.detail || "Could not log waste"));
+    }
+}
+
+async function fetchFinances() {
+    try {
+        const res = await fetch(`${API_URL}/sales/financial-summary`, { 
+            headers: getHeaders() 
+        });
+        
+        if (!res.ok) throw await res.json();
+        const data = await res.json();
+        
+        // Log to console so you can see it working in real-time
+        console.log("Updating Dashboard UI with:", data);
+
+        // Update the actual text on the screen
+        document.getElementById('finance-revenue').textContent = `$${data.total_revenue.toFixed(2)}`;
+        document.getElementById('finance-waste').textContent = `-$${data.total_waste_loss.toFixed(2)}`;
+        document.getElementById('finance-profit').textContent = `$${data.net_profit.toFixed(2)}`;
+        
+    } catch (err) {
+        console.error("Finance UI Update failed:", err);
     }
 }

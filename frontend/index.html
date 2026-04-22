@@ -37,6 +37,7 @@
                 <button onclick="showSection('inventory')" class="w-full text-left p-2 hover:bg-indigo-800 rounded">📦 Inventory</button>
                 <button onclick="showSection('products')" class="w-full text-left p-2 hover:bg-indigo-800 rounded">🥐 Products & POS</button>
                 <button onclick="showSection('orders')" class="w-full text-left p-2 hover:bg-indigo-800 rounded">📋 Custom Orders</button>
+                <button onclick="showSection('finances')" class="w-full text-left p-2 hover:bg-indigo-800 rounded">💰 Finances</button>
             </nav>
             <button onclick="logout()" class="p-4 bg-indigo-950 hover:bg-red-600 text-left font-bold">🚪 Logout</button>
         </aside>
@@ -197,7 +198,24 @@
                     </table>
                 </div>
             </section>
-
+            
+           <section id="section-finances" class="hidden space-y-6">
+                <h2 class="text-3xl font-bold">Financial Health</h2>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div class="bg-white p-6 rounded shadow border-l-4 border-green-500">
+                        <p class="text-sm text-gray-500 uppercase font-bold">Total Revenue</p>
+                        <p id="finance-revenue" class="text-2xl font-bold">$0.00</p>
+                    </div>
+                    <div class="bg-white p-6 rounded shadow border-l-4 border-red-500">
+                        <p class="text-sm text-gray-500 uppercase font-bold">Waste Loss</p>
+                        <p id="finance-waste" class="text-2xl font-bold">-$0.00</p>
+                    </div>
+                    <div class="bg-white p-6 rounded shadow border-l-4 border-indigo-500">
+                        <p class="text-sm text-gray-500 uppercase font-bold">Net Profit</p>
+                        <p id="finance-profit" class="text-2xl font-bold text-indigo-700">$0.00</p>
+                    </div>
+                </div>
+            </section>
         </main>
     </div>
 
