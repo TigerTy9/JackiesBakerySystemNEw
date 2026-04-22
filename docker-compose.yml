@@ -1,0 +1,25 @@
+services:
+  db:
+    image: postgres:15
+    container_name: bakery_db_container
+    restart: always
+    environment:
+      POSTGRES_USER: ty_admin          # Use a specific user
+      POSTGRES_PASSWORD: westen6growling9crystals6truly4renee3turning9vile6ignited2police 
+      POSTGRES_DB: bakery_saas         # The actual database name
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"                    # Allows you to connect via PGAdmin if needed
+
+  backend:
+    build: .
+    ports:
+      - "8100:8100"
+    env_file:
+      - .env                           # Store your DB URL here
+    depends_on:
+      - db
+
+volumes:
+  postgres_data:                       # Persists data even if container is deleted

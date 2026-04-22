@@ -1,0 +1,1042 @@
+PROJECT STRUCTURE:
+JackiesBakerySystemNEw/
+    collectcode.py
+    requirements.txt
+    auth.py
+    .env
+    database.py
+    models.py
+    passwords.txt
+    commands ran
+    utils.py
+    Plan.txt
+    docker-compose.yml
+    main.py
+    crud.py
+    Dockerfile
+    schemas.py
+    routers/
+        __init__.py
+        recipes.py
+        tenants.py
+        sales.py
+        admin.py
+        inventory.py
+
+==================================================
+FILE CONTENTS:
+==================================================
+
+
+FILE: collectcode.py
+--------------------
+import os
+
+# Config: Add folders or files you want to ignore
+EXCLUDE_DIRS = {'.venv', '.env', '.git', '__pycache__', 'node_modules'}
+EXCLUDE_FILES = {'collect_code.py', 'full_project_review.txt', 'foodkeeper_data.json'}
+
+def collect_code():
+    project_root = os.getcwd()
+    output_file = "full_project_review.txt"
+
+    with open(output_file, 'w', encoding='utf-8') as outfile:
+        outfile.write("PROJECT STRUCTURE:\n")
+        # 1. Generate a quick directory tree for the AI
+        for root, dirs, files in os.walk(project_root):
+            dirs[:] = [d for d in dirs if d not in EXCLUDE_DIRS]
+            level = root.replace(project_root, '').count(os.sep)
+            indent = ' ' * 4 * level
+            outfile.write(f"{indent}{os.path.basename(root)}/\n")
+            sub_indent = ' ' * 4 * (level + 1)
+            for f in files:
+                if f not in EXCLUDE_FILES:
+                    outfile.write(f"{sub_indent}{f}\n")
+        
+        outfile.write("\n" + "="*50 + "\nFILE CONTENTS:\n" + "="*50 + "\n")
+
+        # 2. Append the actual contents
+        for root, dirs, files in os.walk(project_root):
+            dirs[:] = [d for d in dirs if d not in EXCLUDE_DIRS]
+            for file in files:
+                if file in EXCLUDE_FILES:
+                    continue
+                
+                file_path = os.path.join(root, file)
+                relative_path = os.path.relpath(file_path, project_root)
+                
+                outfile.write(f"\n\nFILE: {relative_path}\n")
+                outfile.write("-" * (len(relative_path) + 6) + "\n")
+                
+                try:
+                    with open(file_path, 'r', encoding='utf-8') as infile:
+                        outfile.write(infile.read())
+                except Exception as e:
+                    outfile.write(f"[Error reading file: {e}]")
+                
+                outfile.write("\n\n" + "#" * 30 + "\n")
+
+    print(f"✅ Success! Your entire codebase is now in {output_file}")
+
+if __name__ == "__main__":
+    collect_code()
+
+
+
+##############################
+
+
+FILE: requirements.txt
+----------------------
+fastapi
+uvicorn
+sqlalchemy
+psycopg2-binary
+python-dotenv
+pydantic[email]
+python-jose[cryptography]
+passlib[bcrypt]
+bcrypt==4.0.1
+python-multipart
+alembic
+
+##############################
+
+
+FILE: auth.py
+-------------
+import os
+from datetime import datetime, timedelta
+from jose import JWTError, jwt
+from passlib.context import CryptContext
+from fastapi import Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordBearer
+from sqlalchemy.orm import Session
+
+# Internal imports from your project structure [cite: 1, 9, 75]
+import database, models
+
+# Configuration [cite: 28, 84]
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+SECRET_KEY = os.getenv("SECRET_KEY", "SUPER_SECRET_BAKERY_KEY") 
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_HOURS = 8
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
+
+# --- Utility Functions ---
+
+def hash_password(password: str):
+    """Encodes plain text password into a secure hash."""
+    return pwd_context.hash(password)
+
+def verify_password(plain_password, hashed_password):
+    """Checks if the provided password matches the stored hash."""
+    return pwd_context.verify(plain_password, hashed_password)
+
+def create_access_token(data: dict):
+    """Generates a JWT token for a validated user[cite: 89]."""
+    to_encode = data.copy()
+    expire = datetime.utcnow() + timedelta(hours=ACCESS_TOKEN_EXPIRE_HOURS)
+    to_encode.update({"exp": expire})
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
+# --- Dependency Injection ---
+
+def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(database.get_db)):
+    """
+    The security 'guard'. Extract this into your routes to identify 
+    which bakery (tenant) is making the request[cite: 36, 66].
+    """
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username: str = payload.get("sub")
+        if username is None:
+            raise credentials_exception
+    except JWTError:
+        raise credentials_exception
+        
+    user = db.query(models.User).filter(models.User.username == username).first()
+    if user is None:
+        raise credentials_exception
+    return user
+
+##############################
+
+
+FILE: .env
+----------
+POSTGRES_USER=ty_admin
+POSTGRES_PASSWORD=westen6growling9crystals6truly4renee3turning9vile6igni
+POSTGRES_DB=bakery_saas
+DATABASE_URL=postgresql://ty_admin:westen6growling9crystals6truly4renee3turning9vile6igni@db:5432/bakery_saas
+
+##############################
+
+
+FILE: database.py
+-----------------
+import os
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
+# Inside Docker, 'db' is the hostname of the postgres container
+# Format: postgresql://user:password@hostname:port/dbname
+DATABASE_URL = "postgresql://ty_admin:westen6growling9crystals6truly4renee3turning9vile6ignited2police@db:5432/bakery_saas"
+
+engine = create_engine(DATABASE_URL)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+##############################
+
+
+FILE: models.py
+---------------
+from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Boolean
+from sqlalchemy.orm import declarative_base, relationship
+from datetime import datetime
+
+Base = declarative_base()
+
+class Tenant(Base):
+    __tablename__ = "tenants"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    business_name = Column(String, unique=True, index=True)
+    email = Column(String, unique=True, index=True) # Added to match your request
+    domain = Column(String, unique=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    users = relationship("User", back_populates="tenant")
+    ingredients = relationship("Ingredient", back_populates="tenant")
+    products = relationship("Product", back_populates="tenant")
+
+class User(Base):
+    __tablename__ = "users"
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id"))
+    username = Column(String, unique=True, index=True)
+    hashed_password = Column(String) # Replaces passwords.txt
+    role = Column(String) # "owner", "baker", "cashier"
+    
+    tenant = relationship("Tenant", back_populates="users")
+
+class WasteLog(Base):
+    """Tracks spoilage and dropped items to prevent inventory drift.""" 
+    __tablename__ = "waste_logs"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id"))
+    ingredient_id = Column(Integer, ForeignKey("ingredients.id"))
+    lot_id = Column(Integer, ForeignKey("ingredient_lots.id"))
+    quantity_wasted = Column(Float) # In base_unit
+    reason = Column(String) # "Expired", "Dropped", "Spilled" 
+    timestamp = Column(DateTime, default=datetime.utcnow)
+
+class Ingredient(Base):
+    """The master record for raw materials."""
+    __tablename__ = "ingredients"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id"))
+    name = Column(String) 
+    base_unit = Column(String) # Always standard: "grams", "milliliters", or "units"
+    
+    tenant = relationship("Tenant", back_populates="ingredients")
+    lots = relationship("IngredientLot", back_populates="ingredient")
+
+class IngredientLot(Base):
+    """Tracks individual purchases for accurate FIFO margin calculation."""
+    __tablename__ = "ingredient_lots"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    ingredient_id = Column(Integer, ForeignKey("ingredients.id"))
+    purchase_date = Column(DateTime, default=datetime.utcnow)
+    
+    # Financial and Inventory Tracking
+    cost_total = Column(Float) # Total price paid for this lot
+    quantity_purchased = Column(Float) # Converted to base_unit
+    quantity_remaining = Column(Float) # Deducted automatically upon baking
+    
+    is_depleted = Column(Boolean, default=False)
+    
+    ingredient = relationship("Ingredient", back_populates="lots")
+
+class Product(Base):
+    """The finished baked good ready for sale."""
+    __tablename__ = "products"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id"))
+    name = Column(String)
+    retail_price = Column(Float)
+    
+    tenant = relationship("Tenant", back_populates="products")
+    recipe_items = relationship("RecipeItem", back_populates="product")
+
+class RecipeItem(Base):
+    """The Bill of Materials connecting Products to Ingredients."""
+    __tablename__ = "recipe_items"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    product_id = Column(Integer, ForeignKey("products.id"))
+    ingredient_id = Column(Integer, ForeignKey("ingredients.id"))
+    quantity_required = Column(Float) # Amount of base_unit needed
+    
+    product = relationship("Product", back_populates="recipe_items")
+    ingredient = relationship("Ingredient")
+
+class TransactionLog(Base):
+    """Immutable ledger of all sales and calculated margins."""
+    __tablename__ = "transaction_logs"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id"))
+    product_id = Column(Integer, ForeignKey("products.id"))
+    timestamp = Column(DateTime, default=datetime.utcnow)
+    
+    sale_price = Column(Float)
+    
+    # Storing historical margins at the exact moment of sale
+    margin_fifo = Column(Float) # Margin using oldest available inventory costs
+    margin_newest = Column(Float) # Margin using most recent purchase costs
+
+class UnitConversion(Base):
+    __tablename__ = "unit_conversions"
+    
+    id = Column(Integer, primary_key=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id"))
+    from_unit = Column(String) # e.g., "50lb Bag"
+    to_unit = Column(String)   # e.g., "grams"
+    multiplier = Column(Float)  # e.g., 22679.6
+
+##############################
+
+
+FILE: passwords.txt
+-------------------
+westen6growling9crystals6truly4renee3turning9vile6igni
+
+
+##############################
+
+
+FILE: commands ran
+------------------
+-- 1. Create the Tenant
+INSERT INTO tenants (business_name, domain) VALUES ('Baked with Love by Jackie', 'bakedwithlovebyjackie.com');
+
+-- 2. Add an Ingredient (Flour)
+INSERT INTO ingredients (tenant_id, name, base_unit) VALUES (1, 'Bread Flour', 'grams');
+
+-- 3. Buy an "Old" cheap bag (Lot 1)
+INSERT INTO ingredient_lots (ingredient_id, cost_total, quantity_purchased, quantity_remaining) 
+VALUES (1, 10.00, 10000, 10000); -- $10 for 10kg ($0.001/g)
+
+-- 4. Buy a "New" expensive bag (Lot 2)
+INSERT INTO ingredient_lots (ingredient_id, cost_total, quantity_purchased, quantity_remaining) 
+VALUES (1, 20.00, 10000, 10000); -- $20 for 10kg ($0.002/g)
+
+-- 5. Create a Product (Sourdough Loaf) and Recipe
+INSERT INTO products (tenant_id, name, retail_price) VALUES (1, 'Sourdough Loaf', 8.00);
+INSERT INTO recipe_items (product_id, ingredient_id, quantity_required) VALUES (1, 1, 500);
+
+docker compose up --build -d
+
+docker compose ps
+
+docker exec -it bakery_db_container psql -U ty_admin -d bakery_saas
+
+docker compose exec backend alembic upgrade head
+
+docker compose up --build
+
+SELECT * FROM tenants;
+
+docker exec -it bakery_db_container psql -U ty_admin -d bakery_saas -c "DROP TABLE tenants CASCADE;"
+docker compose up --build
+
+-- Insert the conversion for Pounds to Grams for Tenant 1
+INSERT INTO unit_conversions (tenant_id, from_unit, to_unit, multiplier) 
+VALUES (1, 'lb', 'grams', 453.592);
+
+docker compose exec backend alembic revision --autogenerate -m "add hashed password to users"
+docker compose exec backend alembic upgrade head
+
+# 1. Stop the containers and remove the data volume
+docker compose down -v
+
+# 2. Rebuild the image (to ensure requirements.txt changes are in)
+docker compose build
+
+# 3. Start everything back up
+docker compose up
+
+##############################
+
+
+FILE: utils.py
+--------------
+# utils.py
+
+def convert_to_base(quantity: float, from_unit: str, multiplier: float) -> float:
+    """
+    Converts any incoming purchase quantity to the base_unit (usually grams).
+    Example: 1 Bag (from_unit) * 22679.6 (multiplier) = 22679.6g
+    """
+    return quantity * multiplier
+
+def get_margin_status(fifo_margin: float, newest_margin: float) -> str:
+    """
+    Business logic to flag if the baker needs to raise prices.
+    """
+    if newest_margin < (fifo_margin * 0.9): # 10% drop in margin
+        return "CRITICAL: Price Hike Detected"
+    return "Healthy"
+
+def get_conversion_multiplier(db, tenant_id: int, from_unit: str, to_unit: str):
+    """Looks up the multiplier in the unit_conversions table."""
+    conversion = db.query(models.UnitConversion).filter(
+        models.UnitConversion.tenant_id == tenant_id,
+        models.UnitConversion.from_unit == from_unit,
+        models.UnitConversion.to_unit == to_unit
+    ).first()
+    return conversion.multiplier if conversion else 1.0
+
+##############################
+
+
+FILE: Plan.txt
+--------------
+Building a fully integrated bakery management and point-of-sale platform is a highly rewarding project. Structuring it with Python and PostgreSQL provides a scalable, robust foundation, especially since your ultimate goal is to package and sell this software commercially. 
+
+To make this a viable product for multiple businesses, it needs to be architected as a Software-as-a-Service application from day one. Here is a breakdown of the essential features and how to structure the backend to handle your specific inventory and margin requirements.
+
+## Essential System Features
+
+* **Bill of Materials Management:** A recipe engine that maps finished baked goods to exact quantities of raw ingredients.
+* **Lot-Based Inventory Tracking:** To calculate margins based on oldest versus newest ingredient costs, the system must track individual purchase batches rather than just a running total of ingredients.
+* **Automated Deductions:** A trigger system that automatically deducts raw ingredient quantities from the database the moment a finished product is logged as baked or sold.
+* **Dynamic Margin Analysis:** A dashboard displaying profit margins per item, calculated dynamically against both the First-In-First-Out cost and the most recent replacement cost.
+* **Immutable Transaction Logs:** A highly secure ledger recording all sales, inventory adjustments, and waste, ensuring accurate accounting and audit trails.
+* **Multi-Tenancy Architecture:** Data isolation so multiple independent bakeries can use the software simultaneously without their data intersecting.
+
+
+
+## Database Design Strategy in PostgreSQL
+
+To achieve the precise margin calculations you want, your database schema needs to separate the concept of an "Ingredient" from an "Ingredient Purchase". 
+
+* **Products Table:** Stores the finished items ready for sale (e.g., Sourdough Loaf).
+* **Ingredients Table:** The master list of raw materials (e.g., Bread Flour, Salt).
+* **Ingredient_Lots Table:** This is the critical piece. Every time flour is purchased, a new row is created here logging the date, quantity, and specific price paid.
+* **Recipes Table:** Maps Products to Ingredients, specifying the exact weight or volume needed.
+* **Transactions Table:** Logs every sale, linking the Product, sale price, and timestamp.
+
+## Effective Coding Implementation in Python
+
+For a clean, maintainable backend, a framework like Django or FastAPI is highly recommended. Django offers a built-in Object-Relational Mapper that handles complex PostgreSQL queries beautifully, while FastAPI is exceptionally fast and excellent for building modern web application programming interfaces.
+
+* **Handling the Auto-Subtract Logic:** When a user clicks "Bake" on a batch of cookies, your Python code should initiate a database transaction. It will look up the recipe, calculate the total raw ingredients needed, and deduct those quantities from the `Ingredient_Lots` table, starting with the oldest available lot first to maintain accurate physical inventory.
+* **Calculating the Margins:** To show the margin on the "oldest item", your Python logic queries the oldest active lot for each ingredient in the recipe and sums their costs. For the "newest purchase" margin, it queries the most recently added lot for those same ingredients. Subtracting these costs from the final retail price gives the baker a clear view of their true profit spread.
+* **Ensuring Data Integrity:** By wrapping the deduction logic in standard database transactions, you ensure that if an error occurs halfway through deducting ingredients, the entire operation rolls back. This prevents corrupted inventory counts.
+
+Building this with a focus on strict data validation and secure, isolated environments will make the transition from a single-bakery tool to a commercial software product much smoother. 
+
+Are you leaning towards building this as a traditional server-rendered web application, or are you planning to build a standalone backend API that connects to a modern frontend framework?
+
+Yes, looking at the full scope of building a commercial, production-ready SaaS for bakeries, there are several crucial business and technical layers missing from that initial outline. 
+
+If you want this platform to be genuinely useful for a growing baking business and marketable to others, here are the critical missing components:
+
+### The Bakery Business Logic
+
+* **Complex Unit Conversions:** This is the most common point of failure in culinary software. A baker buys flour in 50-pound bags, stores it in large bins, but writes recipes in grams. Your database needs a robust conversion engine so a purchase of "1x 50lb bag" accurately translates to "22,679 grams" in the available inventory pool.
+* **Packaging and Consumables:** A cake is not just flour and sugar. Boxes, cake boards, custom labels, and parchment paper all cost money. To get true profit margins, your Bill of Materials must include these non-edible inventory items.
+* **Spoilage and Waste Tracking:** Ingredients expire, and baked goods go stale or get dropped. If waste is not tracked, the digital inventory will permanently drift away from the physical reality, ruining the margin calculations. 
+* **Custom Orders and Workflow States:** Many independent bakers do a mix of standard retail sales and custom orders (like wedding cakes). The system needs a pipeline for these custom orders: Quote Pending, Deposit Paid, Baking Scheduled, and Ready for Pickup.
+
+### The SaaS Technical Architecture
+
+* **Row-Level Security (RLS) in PostgreSQL:** Since you plan to sell this software, multi-tenancy is critical. If multiple bakeries are on the same database, you must guarantee their data never leaks. Implementing RLS directly in PostgreSQL ensures that even if there is an application-level bug, a user from Bakery A cannot physically query data belonging to Bakery B.
+* **Role-Based Access Control (RBAC):** The business owner needs to see financial margins and system configurations, but a front-of-house cashier or a kitchen assistant should only see the Point of Sale or the daily baking queue. 
+* **Overhead and Labor Apportionment:** For the margin analysis to be perfectly accurate, the system should eventually allow the user to input hourly labor costs and fixed overhead (like web domain hosting, email services, or kitchen rental) to calculate the true Net Margin, not just the Gross Margin of the ingredients.
+* **Audit Logging for Security:** You mentioned transaction logs, but a commercial system needs full audit trails for system events. If an inventory count is manually adjusted or a custom order invoice is deleted, the system needs to record who did it and when, providing a secure, tamper-proof history.
+
+To build this cleanly, the database schema will be the absolute foundation. Would you like to map out the exact PostgreSQL tables and foreign keys needed to handle the complex unit conversions between bulk purchasing and recipe baking?
+
+
+##############################
+
+
+FILE: docker-compose.yml
+------------------------
+services:
+  db:
+    image: postgres:15
+    container_name: bakery_db_container
+    restart: always
+    environment:
+      POSTGRES_USER: ty_admin          # Use a specific user
+      POSTGRES_PASSWORD: westen6growling9crystals6truly4renee3turning9vile6ignited2police 
+      POSTGRES_DB: bakery_saas         # The actual database name
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"                    # Allows you to connect via PGAdmin if needed
+
+  backend:
+    build: .
+    ports:
+      - "8100:8100"
+    env_file:
+      - .env                           # Store your DB URL here
+    depends_on:
+      - db
+
+volumes:
+  postgres_data:                       # Persists data even if container is deleted
+
+##############################
+
+
+FILE: main.py
+-------------
+# main.py
+from fastapi import FastAPI, Depends, HTTPException, status
+from database import engine, get_db
+import models
+from routers import inventory, sales, tenants
+from fastapi.security import OAuth2PasswordRequestForm
+import auth
+from sqlalchemy.orm import Session
+
+# This line creates the actual PostgreSQL tables if they don't exist
+models.Base.metadata.create_all(bind=engine)
+
+app = FastAPI(title="BakeryOS SaaS")
+
+app.include_router(tenants.router)   # For you to add new clients
+app.include_router(inventory.router) # For the baker to add flour/sugar
+app.include_router(sales.router)     # For the POS/Auto-subtract logic
+
+@app.get("/")
+def health_check():
+    return {"status": "active", "system": "BakeryOS"}
+
+@app.post("/login")
+def login_for_access_token(
+    form_data: OAuth2PasswordRequestForm = Depends(), 
+    db: Session = Depends(get_db)
+):
+    # 1. Look up the user
+    user = db.query(models.User).filter(models.User.username == form_data.username).first()
+    
+    # 2. Verify password against the hash 
+    if not user or not auth.verify_password(form_data.password, user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, 
+            detail="Incorrect username or password"
+        )
+    
+    # 3. Create the token [cite: 54]
+    access_token = auth.create_access_token(data={"sub": user.username})
+    return {"access_token": access_token, "token_type": "bearer"}
+
+##############################
+
+
+FILE: crud.py
+-------------
+from sqlalchemy.orm import Session
+from sqlalchemy import desc
+import models, schemas
+
+def process_bake_and_calculate_margins(db: Session, product_id: int, tenant_id: int):
+    product = db.query(models.Product).filter(models.Product.id == product_id).first()
+    
+    total_cost_fifo = 0.0
+    total_cost_newest = 0.0
+    
+    # 1. Loop through every ingredient in the recipe
+    for item in product.recipe_items:
+        qty_needed = item.quantity_required
+        
+        # --- NEWEST PURCHASE PRICE CALCULATION ---
+        newest_lot = db.query(models.IngredientLot)\
+            .filter(models.IngredientLot.ingredient_id == item.ingredient_id)\
+            .order_by(desc(models.IngredientLot.purchase_date)).first()
+        
+        if newest_lot:
+            cost_per_unit_newest = newest_lot.cost_total / newest_lot.quantity_purchased
+            total_cost_newest += (cost_per_unit_newest * qty_needed)
+
+        # --- FIFO DEDUCTION & OLDEST PRICE CALCULATION ---
+        remaining_to_deduct = qty_needed
+        
+        while remaining_to_deduct > 0:
+            # Find the oldest lot that isn't empty
+            oldest_lot = db.query(models.IngredientLot)\
+                .filter(models.IngredientLot.ingredient_id == item.ingredient_id, 
+                        models.IngredientLot.is_depleted == False)\
+                .order_by(models.IngredientLot.purchase_date).first()
+            
+            if not oldest_lot:
+                raise Exception(f"Out of stock: {item.ingredient.name}")
+
+            cost_per_unit_fifo = oldest_lot.cost_total / oldest_lot.quantity_purchased
+            
+            if oldest_lot.quantity_remaining >= remaining_to_deduct:
+                # This lot has enough to cover the rest of the recipe
+                total_cost_fifo += (cost_per_unit_fifo * remaining_to_deduct)
+                oldest_lot.quantity_remaining -= remaining_to_deduct
+                remaining_to_deduct = 0
+            else:
+                # Use what's left in this lot and move to the next
+                total_cost_fifo += (cost_per_unit_fifo * oldest_lot.quantity_remaining)
+                remaining_to_deduct -= oldest_lot.quantity_remaining
+                oldest_lot.quantity_remaining = 0
+                oldest_lot.is_depleted = True
+    
+    # 2. Record the transaction with the margins
+    margin_fifo = product.retail_price - total_cost_fifo
+    margin_newest = product.retail_price - total_cost_newest
+    
+    new_log = models.TransactionLog(
+        tenant_id=tenant_id,
+        product_id=product_id,
+        sale_price=product.retail_price,
+        margin_fifo=margin_fifo,
+        margin_newest=margin_newest
+    )
+    
+    db.add(new_log)
+    db.commit()
+    return new_log
+    
+
+##############################
+
+
+FILE: Dockerfile
+----------------
+FROM python:3.11-slim
+
+# Install system dependencies for PostgreSQL
+RUN apt-get update && apt-get install -y \
+    libpq-dev \
+    gcc \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy requirements first to leverage Docker cache
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy the rest of your code
+COPY . .
+
+# Run the FastAPI app
+# Use "python -m uvicorn" to ensure it's found in the python site-packages
+CMD ["python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8100"]
+
+##############################
+
+
+FILE: schemas.py
+----------------
+from pydantic import BaseModel, EmailStr, Field
+from datetime import datetime
+from typing import List, Optional
+
+class IngredientBase(BaseModel):
+    name: str
+    base_unit: str # e.g., "g", "ml", "unit"
+
+class RecipeItemCreate(BaseModel):
+    ingredient_id: int
+    quantity_required: float
+
+class ProductCreate(BaseModel):
+    name: str
+    retail_price: float
+    recipe: List[RecipeItemCreate]
+
+class SaleCreate(BaseModel):
+    item_id: int
+    quantity: int
+    price: float
+    class Config:
+        from_attributes = True
+
+class SaleResponse(BaseModel):
+    id: int
+    tenant_id: int
+    total_amount: float
+    created_at: datetime
+
+    class Config:
+        from_attributes = True  # This allows Pydantic to read data from SQLAlchemy models
+
+class TenantBase(BaseModel):
+    name: str  # We'll map this to business_name
+    email: EmailStr
+
+class TenantCreate(TenantBase):
+    pass
+
+class TenantResponse(BaseModel):
+    id: int
+    business_name: str
+    email: str
+    domain: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True # Allows Pydantic to read SQLAlchemy models
+
+class IngredientCreate(BaseModel):
+    tenant_id: int
+    name: str
+    base_unit: str
+
+class IngredientResponse(BaseModel):
+    id: int
+    tenant_id: int
+    name: str
+    base_unit: str
+
+    class Config:
+        from_attributes = True
+
+class UserCreate(BaseModel):
+    tenant_id: int
+    username: str
+    password: str
+    role: str # "owner", "baker", "cashier" 
+
+class UserResponse(BaseModel):
+    id: int
+    tenant_id: int
+    username: str
+    role: str
+
+    class Config:
+        from_attributes = True
+
+##############################
+
+
+FILE: routers/__init__.py
+-------------------------
+
+
+##############################
+
+
+FILE: routers/recipes.py
+------------------------
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+import database, models, schemas
+
+router = APIRouter(prefix="/products", tags=["Products & Recipes"])
+
+@router.post("/", response_model=schemas.ProductCreate)
+def create_product_with_recipe(product_in: schemas.ProductCreate, tenant_id: int, db: Session = Depends(database.get_db)):
+    # 1. Create the Product master record
+    new_product = models.Product(
+        tenant_id=tenant_id,
+        name=product_in.name,
+        retail_price=product_in.retail_price
+    )
+    db.add(new_product)
+    db.commit()
+    db.refresh(new_product)
+
+    # 2. Add each Ingredient to the Recipe
+    for item in product_in.recipe:
+        recipe_entry = models.RecipeItem(
+            product_id=new_product.id,
+            ingredient_id=item.ingredient_id,
+            quantity_required=item.quantity_required
+        )
+        db.add(recipe_entry)
+    
+    db.commit()
+    return new_product
+
+##############################
+
+
+FILE: routers/tenants.py
+------------------------
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+import database, models, schemas
+from auth import hash_password
+
+router = APIRouter(prefix="/tenants", tags=["tenants"])
+
+@router.post("/", response_model=schemas.TenantResponse)
+def create_tenant(tenant: schemas.TenantCreate, db: Session = Depends(database.get_db)):
+    # 1. Map Schema 'name' to Model 'business_name'
+    # 2. Generate a basic domain from the name
+    generated_domain = f"{tenant.name.lower().replace(' ', '-')}.bakeryos.com"
+    
+    db_tenant = models.Tenant(
+        business_name=tenant.name,
+        email=tenant.email,
+        domain=generated_domain
+    )
+    
+    try:
+        db.add(db_tenant)
+        db.commit()
+        db.refresh(db_tenant)
+        return db_tenant
+    except Exception as e:
+        db.rollback()
+        # This catches things like duplicate names/emails
+        raise HTTPException(status_code=400, detail=f"Database error: {str(e)}")
+
+@router.post("/register-user", response_model=schemas.UserResponse)
+def register_user(user_in: schemas.UserCreate, db: Session = Depends(database.get_db)):
+    # 1. Check if user already exists
+    existing_user = db.query(models.User).filter(models.User.username == user_in.username).first()
+    if existing_user:
+        raise HTTPException(status_code=400, detail="Username already registered")
+    
+    # 2. Hash the password before saving 
+    hashed_pwd = hash_password(user_in.password)
+    
+    new_user = models.User(
+        tenant_id=user_in.tenant_id,
+        username=user_in.username,
+        hashed_password=hashed_pwd,
+        role=user_in.role
+    )
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+    return new_user
+
+##############################
+
+
+FILE: routers/sales.py
+----------------------
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+import database, crud, schemas
+
+router = APIRouter(prefix="/sales", tags=["Sales"])
+
+@router.post("/record-sale", response_model=schemas.SaleResponse)
+def record_sale(sale: schemas.SaleCreate, db: Session = Depends(database.get_db)):
+    try:
+        return crud.process_bake_and_calculate_margins(db, sale.product_id, sale.tenant_id)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+##############################
+
+
+FILE: routers/admin.py
+----------------------
+from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
+import models, database
+
+router = APIRouter(prefix="/admin", tags=["Super Admin"])
+
+@router.post("/create-tenant")
+def create_new_bakery(name: str, domain: str, db: Session = Depends(database.get_db)):
+    new_bakery = models.Tenant(business_name=name, domain=domain)
+    db.add(new_bakery)
+    db.commit()
+    return {"message": f"Bakery {name} is now live on the platform."}
+
+@router.get("/global-stats")
+def get_platform_metrics(db: Session = Depends(database.get_db)):
+    # Total revenue processed across all bakeries (for your marketing)
+    total_sales = db.query(models.TransactionLog).count()
+    return {"total_transactions_managed": total_sales}
+
+##############################
+
+
+FILE: routers/inventory.py
+--------------------------
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+import database, models, schemas, utils
+from auth import get_current_user
+from typing import List
+
+# This is what main.py is looking for
+router = APIRouter(
+    prefix="/inventory",
+    tags=["inventory"]
+)
+
+@router.get("/")
+def get_inventory():
+    return {"message": "Inventory system active"}
+
+@router.post("/receive-lot")
+def receive_inventory(ingredient_id: int, qty: float, unit: str, cost: float, tenant_id: int, db: Session = Depends(database.get_db)):
+    ingredient = db.query(models.Ingredient).get(ingredient_id)
+    if not ingredient:
+        raise HTTPException(status_code=404, detail="Ingredient not found")
+
+    # If the units match exactly, multiplier is 1.0
+    if unit == ingredient.base_unit:
+        multiplier = 1.0
+    else:
+        multiplier = utils.get_conversion_multiplier(db, tenant_id, unit, ingredient.base_unit)
+        
+    # Check if a multiplier was actually found
+    if multiplier is None:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"No conversion found for {unit} to {ingredient.base_unit}"
+        )
+
+    base_qty = qty * multiplier
+    
+    # 2. Create the Lot [cite: 39]
+    new_lot = models.IngredientLot(
+        ingredient_id=ingredient_id,
+        cost_total=cost,
+        quantity_purchased=base_qty,
+        quantity_remaining=base_qty
+    )
+    db.add(new_lot)
+    db.commit()
+    return {"message": f"Received {base_qty} {ingredient.base_unit} of inventory."}
+
+@router.post("/log-waste")
+def log_waste(ingredient_id: int, qty: float, reason: str, tenant_id: int, db: Session = Depends(database.get_db)):
+    # Logic to find oldest non-depleted lot and deduct waste
+    oldest_lot = db.query(models.IngredientLot).filter(
+        models.IngredientLot.ingredient_id == ingredient_id,
+        models.IngredientLot.is_depleted == False
+    ).order_by(models.IngredientLot.purchase_date).first()
+    
+    if not oldest_lot or oldest_lot.quantity_remaining < qty:
+        raise HTTPException(status_code=400, detail="Not enough inventory to waste.")
+
+    oldest_lot.quantity_remaining -= qty
+    if oldest_lot.quantity_remaining <= 0:
+        oldest_lot.is_depleted = True
+        
+    new_waste = models.WasteLog(
+        tenant_id=tenant_id, 
+        ingredient_id=ingredient_id, 
+        lot_id=oldest_lot.id, 
+        quantity_wasted=qty, 
+        reason=reason
+    )
+    db.add(new_waste)
+    db.commit()
+    return {"message": "Waste logged successfully."}
+
+@router.post("/add-ingredient", response_model=schemas.IngredientResponse)
+def add_ingredient(ingredient: schemas.IngredientCreate, db: Session = Depends(database.get_db)):
+    # Create the master record for a raw material
+    new_ingredient = models.Ingredient(
+        tenant_id=ingredient.tenant_id,
+        name=ingredient.name,
+        base_unit=ingredient.base_unit  # Should be 'grams', 'ml', or 'units'
+    )
+    db.add(new_ingredient)
+    db.commit()
+    db.refresh(new_ingredient)
+    return new_ingredient
+
+@router.put("/edit-ingredient/{ingredient_id}")
+def edit_ingredient(
+    ingredient_id: int, 
+    updated_data: schemas.IngredientCreate, 
+    current_user: models.User = Depends(get_current_user), # New Dependency
+    db: Session = Depends(database.get_db)
+):
+    # Only allow edits if the ingredient belongs to the user's bakery
+    db_ingredient = db.query(models.Ingredient).filter(
+        models.Ingredient.id == ingredient_id,
+        models.Ingredient.tenant_id == current_user.tenant_id
+    ).first()
+    
+    if not db_ingredient:
+        raise HTTPException(status_code=404, detail="Not authorized or not found")
+    
+    db_ingredient.name = updated_data.name
+    db_ingredient.base_unit = updated_data.base_unit
+    db.commit()
+    return db_ingredient
+
+@router.delete("/remove-ingredient/{ingredient_id}", status_code=status.HTTP_204_NO_CONTENT)
+def remove_ingredient(
+    ingredient_id: int, 
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(get_current_user) # Securely identifies the bakery
+):
+    # 1. Search for the ingredient restricted to the User's Tenant ID
+    db_ingredient = db.query(models.Ingredient).filter(
+        models.Ingredient.id == ingredient_id,
+        models.Ingredient.tenant_id == current_user.tenant_id
+    ).first()
+    
+    # 2. If not found or belongs to another bakery, 404 is returned to mask data existence
+    if not db_ingredient:
+        raise HTTPException(
+            status_code=404, 
+            detail="Ingredient not found in your bakery inventory"
+        )
+
+    # 3. Integrity Check: Ensure no active Lots or Recipes depend on this
+    has_lots = db.query(models.IngredientLot).filter(
+        models.IngredientLot.ingredient_id == ingredient_id
+    ).first()
+    
+    has_recipes = db.query(models.RecipeItem).filter(
+        models.RecipeItem.ingredient_id == ingredient_id
+    ).first()
+
+    if has_lots or has_recipes:
+        raise HTTPException(
+            status_code=400, 
+            detail="Cannot delete ingredient with active purchase lots or recipes. Archive it instead."
+        )
+
+    # 4. Final Deletion
+    db.delete(db_ingredient)
+    db.commit()
+    return None
+
+@router.get("/list", response_model=List[schemas.IngredientResponse])
+def list_ingredients(
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    # Retrieve only the ingredients belonging to this specific tenant
+    ingredients = db.query(models.Ingredient).filter(
+        models.Ingredient.tenant_id == current_user.tenant_id
+    ).all()
+    return ingredients
+
+##############################

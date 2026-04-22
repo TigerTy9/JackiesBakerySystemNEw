@@ -1,0 +1,117 @@
+from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Boolean
+from sqlalchemy.orm import declarative_base, relationship
+from datetime import datetime
+
+Base = declarative_base()
+
+class Tenant(Base):
+    __tablename__ = "tenants"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    business_name = Column(String, unique=True, index=True)
+    email = Column(String, unique=True, index=True) # Added to match your request
+    domain = Column(String, unique=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    users = relationship("User", back_populates="tenant")
+    ingredients = relationship("Ingredient", back_populates="tenant")
+    products = relationship("Product", back_populates="tenant")
+
+class User(Base):
+    __tablename__ = "users"
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id"))
+    username = Column(String, unique=True, index=True)
+    hashed_password = Column(String) # Replaces passwords.txt
+    role = Column(String) # "owner", "baker", "cashier"
+    
+    tenant = relationship("Tenant", back_populates="users")
+
+class WasteLog(Base):
+    """Tracks spoilage and dropped items to prevent inventory drift.""" 
+    __tablename__ = "waste_logs"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id"))
+    ingredient_id = Column(Integer, ForeignKey("ingredients.id"))
+    lot_id = Column(Integer, ForeignKey("ingredient_lots.id"))
+    quantity_wasted = Column(Float) # In base_unit
+    reason = Column(String) # "Expired", "Dropped", "Spilled" 
+    timestamp = Column(DateTime, default=datetime.utcnow)
+
+class Ingredient(Base):
+    """The master record for raw materials."""
+    __tablename__ = "ingredients"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id"))
+    name = Column(String) 
+    base_unit = Column(String) # Always standard: "grams", "milliliters", or "units"
+    
+    tenant = relationship("Tenant", back_populates="ingredients")
+    lots = relationship("IngredientLot", back_populates="ingredient")
+
+class IngredientLot(Base):
+    """Tracks individual purchases for accurate FIFO margin calculation."""
+    __tablename__ = "ingredient_lots"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    ingredient_id = Column(Integer, ForeignKey("ingredients.id"))
+    purchase_date = Column(DateTime, default=datetime.utcnow)
+    
+    # Financial and Inventory Tracking
+    cost_total = Column(Float) # Total price paid for this lot
+    quantity_purchased = Column(Float) # Converted to base_unit
+    quantity_remaining = Column(Float) # Deducted automatically upon baking
+    
+    is_depleted = Column(Boolean, default=False)
+    
+    ingredient = relationship("Ingredient", back_populates="lots")
+
+class Product(Base):
+    """The finished baked good ready for sale."""
+    __tablename__ = "products"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id"))
+    name = Column(String)
+    retail_price = Column(Float)
+    
+    tenant = relationship("Tenant", back_populates="products")
+    recipe_items = relationship("RecipeItem", back_populates="product")
+
+class RecipeItem(Base):
+    """The Bill of Materials connecting Products to Ingredients."""
+    __tablename__ = "recipe_items"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    product_id = Column(Integer, ForeignKey("products.id"))
+    ingredient_id = Column(Integer, ForeignKey("ingredients.id"))
+    quantity_required = Column(Float) # Amount of base_unit needed
+    
+    product = relationship("Product", back_populates="recipe_items")
+    ingredient = relationship("Ingredient")
+
+class TransactionLog(Base):
+    """Immutable ledger of all sales and calculated margins."""
+    __tablename__ = "transaction_logs"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id"))
+    product_id = Column(Integer, ForeignKey("products.id"))
+    timestamp = Column(DateTime, default=datetime.utcnow)
+    
+    sale_price = Column(Float)
+    
+    # Storing historical margins at the exact moment of sale
+    margin_fifo = Column(Float) # Margin using oldest available inventory costs
+    margin_newest = Column(Float) # Margin using most recent purchase costs
+
+class UnitConversion(Base):
+    __tablename__ = "unit_conversions"
+    
+    id = Column(Integer, primary_key=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id"))
+    from_unit = Column(String) # e.g., "50lb Bag"
+    to_unit = Column(String)   # e.g., "grams"
+    multiplier = Column(Float)  # e.g., 22679.6

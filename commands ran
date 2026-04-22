@@ -1,0 +1,48 @@
+-- 1. Create the Tenant
+INSERT INTO tenants (business_name, domain) VALUES ('Baked with Love by Jackie', 'bakedwithlovebyjackie.com');
+
+-- 2. Add an Ingredient (Flour)
+INSERT INTO ingredients (tenant_id, name, base_unit) VALUES (1, 'Bread Flour', 'grams');
+
+-- 3. Buy an "Old" cheap bag (Lot 1)
+INSERT INTO ingredient_lots (ingredient_id, cost_total, quantity_purchased, quantity_remaining) 
+VALUES (1, 10.00, 10000, 10000); -- $10 for 10kg ($0.001/g)
+
+-- 4. Buy a "New" expensive bag (Lot 2)
+INSERT INTO ingredient_lots (ingredient_id, cost_total, quantity_purchased, quantity_remaining) 
+VALUES (1, 20.00, 10000, 10000); -- $20 for 10kg ($0.002/g)
+
+-- 5. Create a Product (Sourdough Loaf) and Recipe
+INSERT INTO products (tenant_id, name, retail_price) VALUES (1, 'Sourdough Loaf', 8.00);
+INSERT INTO recipe_items (product_id, ingredient_id, quantity_required) VALUES (1, 1, 500);
+
+docker compose up --build -d
+
+docker compose ps
+
+docker exec -it bakery_db_container psql -U ty_admin -d bakery_saas
+
+docker compose exec backend alembic upgrade head
+
+docker compose up --build
+
+SELECT * FROM tenants;
+
+docker exec -it bakery_db_container psql -U ty_admin -d bakery_saas -c "DROP TABLE tenants CASCADE;"
+docker compose up --build
+
+-- Insert the conversion for Pounds to Grams for Tenant 1
+INSERT INTO unit_conversions (tenant_id, from_unit, to_unit, multiplier) 
+VALUES (1, 'lb', 'grams', 453.592);
+
+docker compose exec backend alembic revision --autogenerate -m "add hashed password to users"
+docker compose exec backend alembic upgrade head
+
+# 1. Stop the containers and remove the data volume
+docker compose down -v
+
+# 2. Rebuild the image (to ensure requirements.txt changes are in)
+docker compose build
+
+# 3. Start everything back up
+docker compose up
