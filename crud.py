@@ -2,9 +2,17 @@ from sqlalchemy.orm import Session
 from sqlalchemy import desc
 import models, schemas
 
-def execute_production_run(db: Session, product_id: int, tenant_id: int, quantity_produced: int):
+def execute_production_run(
+    db: Session, 
+    product_id: int, 
+    tenant_id: int, 
+    quantity_produced: int, 
+    labor_hours: float = 0.0, 
+    hourly_rate: float = 0.0
+):
     """
     1. THE BAKE: Deducts raw ingredients and creates a batch of Finished Goods.
+    Now includes Labor and Overhead apportionment for true Net Margin analysis. 
     """
     product = db.query(models.Product).filter(models.Product.id == product_id).first()
     if not product:
@@ -13,26 +21,26 @@ def execute_production_run(db: Session, product_id: int, tenant_id: int, quantit
     total_cost_fifo = 0.0
     total_cost_newest = 0.0
     
-    # Deduct raw ingredients based on the recipe [cite: 93, 94]
+    # --- STEP 1: DEDUCT RAW INGREDIENTS (FIFO) ---
     for item in product.recipe_items:
-        total_qty_needed = item.quantity_required * quantity_produced
+        total_qty_needed = item.quantity_required * quantity_produced 
         
-        # Calculate newest replacement cost [cite: 94, 95]
+        # Calculate newest replacement cost for secondary margin view 
         newest_lot = db.query(models.IngredientLot)\
             .filter(models.IngredientLot.ingredient_id == item.ingredient_id)\
             .order_by(desc(models.IngredientLot.purchase_date)).first()
          
         if newest_lot:
-            cost_per_unit_newest = newest_lot.cost_total / newest_lot.quantity_purchased
-            total_cost_newest += (cost_per_unit_newest * total_qty_needed)
+            cost_per_unit_newest = newest_lot.cost_total / newest_lot.quantity_purchased 
+            total_cost_newest += (cost_per_unit_newest * total_qty_needed) 
 
-        # Deduct from oldest physical inventory (FIFO) [cite: 95, 96, 97]
+        # Deduct from oldest physical inventory lots
         remaining_to_deduct = total_qty_needed
         while remaining_to_deduct > 0:
             oldest_lot = db.query(models.IngredientLot)\
                 .filter(models.IngredientLot.ingredient_id == item.ingredient_id, 
                         models.IngredientLot.is_depleted == False)\
-                .order_by(models.IngredientLot.purchase_date).first()
+                .order_by(models.IngredientLot.purchase_date).first() 
             
             if not oldest_lot:
                 raise Exception(f"Out of stock: {item.ingredient.name}")
@@ -40,28 +48,63 @@ def execute_production_run(db: Session, product_id: int, tenant_id: int, quantit
             cost_per_unit_fifo = oldest_lot.cost_total / oldest_lot.quantity_purchased
              
             if oldest_lot.quantity_remaining >= remaining_to_deduct:
-                oldest_lot.quantity_remaining -= remaining_to_deduct
+                oldest_lot.quantity_remaining -= remaining_to_deduct 
                 total_cost_fifo += (cost_per_unit_fifo * remaining_to_deduct)
                 remaining_to_deduct = 0 
             else:
                 total_cost_fifo += (cost_per_unit_fifo * oldest_lot.quantity_remaining)
                 remaining_to_deduct -= oldest_lot.quantity_remaining
-                oldest_lot.quantity_remaining = 0
+                oldest_lot.quantity_remaining = 0 
                 oldest_lot.is_depleted = True
             
             db.flush()
-            
-    # Create the Finished Goods batch with the locked-in costs per individual pastry
+
+    # --- STEP 2: CALCULATE LABOR & OVERHEAD --- 
+    
+    # Calculate variable labor for this specific batch
+    batch_labor_total = labor_hours * hourly_rate
+    
+    # Apportion Fixed Overhead (e.g., Rent, Utilities)
+    # Strategy: Sum all monthly overhead and divide by a standard monthly volume (e.g., 2000 units)
+    # In a production system, this ensures every pastry "carries" its share of the rent.
+    monthly_overhead = db.query(func.sum(models.OverheadExpense.monthly_amount))\
+                         .filter(models.OverheadExpense.tenant_id == tenant_id).scalar() or 0.0
+    
+    # Assuming a standard denominator for apportionment; 
+    # alternatively, this can be dynamic based on previous month's total quantity_produced.
+    standard_monthly_volume = 2000 
+    overhead_per_unit = monthly_overhead / standard_monthly_volume
+
+    # --- STEP 3: CREATE THE FINISHED GOODS BATCH ---
+    
+    # Final unit cost = (Ingredient Cost + Labor Cost) / Total Quantity + Overhead Share
+    ingredient_cost_per_unit = total_cost_fifo / quantity_produced if quantity_produced > 0 else 0
+    labor_cost_per_unit = batch_labor_total / quantity_produced if quantity_produced > 0 else 0
+    
+    final_net_cost_per_unit = ingredient_cost_per_unit + labor_cost_per_unit + overhead_per_unit
+
     new_batch = models.FinishedGoodsLot(
         tenant_id=tenant_id,
         product_id=product_id,
         quantity_produced=quantity_produced,
         quantity_remaining=quantity_produced,
-        cost_per_unit_fifo=total_cost_fifo / quantity_produced if quantity_produced > 0 else 0,
+        # We store the final Net Cost as the cost_per_unit_fifo for margin accuracy
+        cost_per_unit_fifo=final_net_cost_per_unit,
         cost_per_unit_newest=total_cost_newest / quantity_produced if quantity_produced > 0 else 0
     )
     
     db.add(new_batch)
+    
+    # Log labor record for auditing
+    if labor_hours > 0:
+        db.add(models.LaborLog(
+            tenant_id=tenant_id,
+            lot_id=new_batch.id,
+            hours_spent=labor_hours,
+            hourly_rate=hourly_rate,
+            total_labor_cost=batch_labor_total
+        ))
+
     db.commit()
     return new_batch
 
@@ -100,7 +143,7 @@ def record_finished_goods_sale(db: Session, product_id: int, tenant_id: int, qua
             
         db.flush()
 
-    # Calculate final margins and log the sale [cite: 100, 101]
+    # Calculate final margins and log the sale 
     total_revenue = product.retail_price * quantity_sold
     margin_fifo = total_revenue - total_fifo_cost
     margin_newest = total_revenue - total_newest_cost

@@ -33,7 +33,7 @@ def get_product_margins(
 ):
     check_admin_or_owner(current_user)
     
-    # 1. Get Total Revenue and Ingredient Costs from Sales [cite: 116, 140]
+    # 1. Get Total Revenue and Ingredient Costs from Sales 
     sales_data = db.query(
         func.sum(models.TransactionLog.sale_price).label("revenue"),
         func.sum(models.TransactionLog.sale_price - models.TransactionLog.margin_fifo).label("cogs")
@@ -68,33 +68,37 @@ def get_bakery_finances(
     db: Session = Depends(get_tenant_db), 
     current_user: models.User = Depends(get_current_user)
 ):
-    # Ensure only owners can see the money
     check_admin_or_owner(current_user)
 
-    # Use COALESCE/scalar logic to prevent NoneType errors in Python
-    # 1. Total Revenue and COGS
+    # 1. Calculate Gross Revenue and Ingredient/Labor Costs (COGS)
     sales_query = db.query(
         func.sum(models.TransactionLog.sale_price).label("revenue"),
         func.sum(models.TransactionLog.sale_price - models.TransactionLog.margin_fifo).label("cogs")
     ).filter(models.TransactionLog.tenant_id == current_user.tenant_id).first()
 
-    revenue = sales_query.revenue if sales_query.revenue is not None else 0.0
-    cogs = sales_query.cogs if sales_query.cogs is not None else 0.0
+    revenue = sales_query.revenue or 0.0
+    cogs = sales_query.cogs or 0.0
 
-    # 2. Total Financial Loss from Waste [cite: 36, 38]
-    # We join FinishedGoodsWasteLog to the Lot to find the original cost
+    # 2. Total Waste Loss (Baked goods thrown away)
     waste_loss = db.query(
         func.sum(models.FinishedGoodsWasteLog.quantity_wasted * models.FinishedGoodsLot.cost_per_unit_fifo)
     ).join(models.FinishedGoodsLot).filter(
         models.FinishedGoodsWasteLog.tenant_id == current_user.tenant_id
     ).scalar() or 0.0
 
-    net_profit = revenue - cogs - waste_loss
+    # 3. Total Monthly Overhead (The "Lump Sum" you want to see deducted)
+    total_overhead = db.query(
+        func.sum(models.OverheadExpense.monthly_amount)
+    ).filter(models.OverheadExpense.tenant_id == current_user.tenant_id).scalar() or 0.0
+
+    # NEW FORMULA: Profit = Revenue - COGS - Waste - Total Overhead
+    net_profit = revenue - cogs - waste_loss - total_overhead
 
     return {
-        "total_revenue": revenue,
-        "total_waste_loss": waste_loss,
-        "net_profit": net_profit
+        "total_revenue": round(revenue, 2),
+        "total_waste_loss": round(waste_loss, 2),
+        "total_overhead": round(total_overhead, 2),
+        "net_profit": round(net_profit, 2)
     }
 
 @router.get("/history")
@@ -119,3 +123,30 @@ def get_transaction_history(
         "sale_price": t[0].sale_price,
         "margin_fifo": t[0].margin_fifo
     } for t in transactions]
+
+@router.get("/overhead", response_model=List[schemas.OverheadResponse])
+def list_overhead(db: Session = Depends(get_tenant_db)):
+    return db.query(models.OverheadExpense).all()
+
+@router.post("/overhead", response_model=schemas.OverheadResponse)
+def add_overhead(
+    expense: schemas.OverheadCreate, 
+    db: Session = Depends(get_tenant_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    new_exp = models.OverheadExpense(
+        tenant_id=current_user.tenant_id,
+        **expense.dict()
+    )
+    db.add(new_exp)
+    db.commit()
+    return new_exp
+
+@router.delete("/overhead/{expense_id}")
+def delete_overhead(expense_id: int, db: Session = Depends(get_tenant_db)):
+    exp = db.query(models.OverheadExpense).filter(models.OverheadExpense.id == expense_id).first()
+    if not exp:
+        raise HTTPException(status_code=404, detail="Expense not found")
+    db.delete(exp)
+    db.commit()
+    return {"message": "Deleted"}

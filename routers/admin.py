@@ -70,6 +70,6 @@ def impersonate_user(user_id: int, db: Session = Depends(database.get_db)):
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     
-    # Generate a valid JWT token just like the normal login route does [cite: 89, 90]
+    # Generate a valid JWT token just like the normal login route does 
     access_token = auth.create_access_token(data={"sub": user.username})
     return {"access_token": access_token, "token_type": "bearer"}

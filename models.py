@@ -198,8 +198,30 @@ class FinishedGoodsWasteLog(Base):
     lot_id = Column(Integer, ForeignKey("finished_goods_lots.id"))
     
     quantity_wasted = Column(Integer)
-    reason = Column(String) # e.g., "Expired", "Dropped", "Donated" [cite: 19]
+    reason = Column(String) # e.g., "Expired", "Dropped", "Donated" 
     timestamp = Column(DateTime, default=datetime.utcnow)
 
     # Link back to the specific production run to retrieve costs 
     finished_goods_lot = relationship("FinishedGoodsLot")
+
+class OverheadExpense(Base):
+    """Fixed monthly costs like rent, hosting, and utilities."""
+    __tablename__ = "overhead_expenses"
+    
+    id = Column(Integer, primary_key=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id"))
+    name = Column(String) # e.g., "Kitchen Rent", "BakeryOS Subscription"
+    monthly_amount = Column(Float)
+    category = Column(String) # "Fixed", "Utility", "Subscription"
+
+class LaborLog(Base):
+    """Tracks labor time spent on specific production batches."""
+    __tablename__ = "labor_logs"
+    
+    id = Column(Integer, primary_key=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id"))
+    lot_id = Column(Integer, ForeignKey("finished_goods_lots.id"))
+    
+    hours_spent = Column(Float)
+    hourly_rate = Column(Float) # The wage of the baker for this specific batch
+    total_labor_cost = Column(Float) # Calculated as hours * rate

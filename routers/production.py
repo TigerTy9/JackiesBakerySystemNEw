@@ -37,7 +37,7 @@ def log_finished_goods_waste(
     current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_tenant_db)
 ):
-    # Find the specific batch [cite: 113, 131]
+    # Find the specific batch
     lot = db.query(models.FinishedGoodsLot).filter(
         models.FinishedGoodsLot.id == lot_id,
         models.FinishedGoodsLot.tenant_id == current_user.tenant_id
@@ -46,7 +46,7 @@ def log_finished_goods_waste(
     if not lot or lot.quantity_remaining < qty:
         raise HTTPException(status_code=400, detail="Insufficient stock in this lot to waste.")
 
-    # Deduct from physical inventory [cite: 114, 115]
+    # Deduct from physical inventory
     lot.quantity_remaining -= qty
     if lot.quantity_remaining <= 0:
         lot.is_depleted = True

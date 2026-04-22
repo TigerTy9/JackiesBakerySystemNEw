@@ -47,7 +47,7 @@ def login_for_access_token(
             detail="Incorrect username or password"
         )
     
-    # 3. Create the token [cite: 54]
+    # 3. Create the token 
     access_token = auth.create_access_token(data={"sub": user.username})
     return {"access_token": access_token, "token_type": "bearer"}
 

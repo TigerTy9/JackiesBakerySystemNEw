@@ -165,3 +165,18 @@ class FinishedGoodsResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+class OverheadBase(BaseModel):
+    name: str
+    monthly_amount: float
+    category: str # e.g., "Fixed", "Subscription", "Utility"
+
+class OverheadCreate(OverheadBase):
+    pass
+
+class OverheadResponse(OverheadBase):
+    id: int
+    tenant_id: int
+
+    class Config:
+        from_attributes = True

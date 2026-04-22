@@ -68,7 +68,10 @@ function showSection(sectionId) {
     if (sectionId === 'inventory') fetchStockLevels();
     if (sectionId === 'products') fetchProducts();
     if (sectionId === 'orders') fetchOrders();
-    if (sectionId === 'finances') fetchFinances();
+    if (sectionId === 'finances') { 
+        fetchFinances();
+        fetchOverheadExpenses();
+    }
     if (sectionId === 'transactions') fetchTransactionHistory();
 }
 
@@ -495,7 +498,7 @@ async function logWaste(lotId) {
         if (!res.ok) throw await res.json();
 
         alert("Waste recorded successfully!");
-        fetchProducts(); // Refresh the POS display [cite: 254, 272]
+        fetchProducts(); // Refresh the POS display
     } catch (err) {
         alert("Error: " + (err.detail || "Could not log waste"));
     }
@@ -518,6 +521,11 @@ async function fetchFinances() {
         document.getElementById('finance-waste').textContent = `-$${data.total_waste_loss.toFixed(2)}`;
         document.getElementById('finance-profit').textContent = `$${data.net_profit.toFixed(2)}`;
         
+        // Line to show overhead deduction
+        if (document.getElementById('finance-overhead')) {
+            document.getElementById('finance-overhead').textContent = `-$${data.total_overhead.toFixed(2)}`;
+        }
+
     } catch (err) {
         console.error("Finance UI Update failed:", err);
     }
@@ -539,5 +547,65 @@ async function fetchTransactionHistory() {
         `).join('');
     } catch (err) {
         console.error("Failed to load transactions", err);
+    }
+}
+
+async function fetchOverheadExpenses() {
+    try {
+        const res = await fetch(`${API_URL}/sales/overhead`, { headers: getHeaders() });
+        const expenses = await res.json();
+        
+        const tbody = document.getElementById('overhead-table-body');
+        tbody.innerHTML = expenses.map(exp => `
+            <tr class="hover:bg-gray-50 border-b">
+                <td class="p-3 font-medium">${exp.name}</td>
+                <td class="p-3 font-bold text-red-600">$${exp.monthly_amount.toFixed(2)}</td>
+                <td class="p-3"><span class="bg-gray-100 px-2 py-1 rounded text-xs text-gray-600 uppercase font-bold">${exp.category}</span></td>
+                <td class="p-3 text-right space-x-2">
+                    <button onclick="deleteExpense(${exp.id})" class="text-red-500 hover:text-red-700 text-xs font-bold">Delete</button>
+                </td>
+            </tr>
+        `).join('');
+    } catch (err) {
+        console.error("Failed to load overhead:", err);
+    }
+}
+
+async function openAddExpenseModal() {
+    const name = prompt("Expense Name (e.g., Kitchen Rent):");
+    const amount = prompt("Monthly Amount ($):");
+    const category = prompt("Category (Fixed, Subscription, Utility):");
+
+    if (!name || !amount || isNaN(amount)) return;
+
+    try {
+        const res = await fetch(`${API_URL}/sales/overhead`, {
+            method: 'POST',
+            headers: getHeaders(),
+            body: JSON.stringify({ name, monthly_amount: parseFloat(amount), category })
+        });
+        
+        if (!res.ok) throw await res.json();
+        alert("Overhead expense added!");
+        fetchOverheadExpenses();
+        fetchFinances(); // Refresh total net profit
+    } catch (err) {
+        alert("Error: " + (err.detail || "Failed to add expense"));
+    }
+}
+
+async function deleteExpense(id) {
+    if (!confirm("Remove this expense?")) return;
+    try {
+        const res = await fetch(`${API_URL}/sales/overhead/${id}`, {
+            method: 'DELETE',
+            headers: getHeaders()
+        });
+        if (res.ok) {
+            fetchOverheadExpenses();
+            fetchFinances();
+        }
+    } catch (err) {
+        console.error("Delete failed:", err);
     }
 }

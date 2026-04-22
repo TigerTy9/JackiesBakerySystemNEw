@@ -122,10 +122,10 @@ from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
-# Internal imports from your project structure [cite: 1, 9, 75]
+# Internal imports from your project structure
 import database, models
 
-# Configuration [cite: 28, 84]
+# Configuration
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 SECRET_KEY = os.getenv("SECRET_KEY", "SUPER_SECRET_BAKERY_KEY") 
 ALGORITHM = "HS256"
@@ -144,7 +144,7 @@ def verify_password(plain_password, hashed_password):
     return pwd_context.verify(plain_password, hashed_password)
 
 def create_access_token(data: dict):
-    """Generates a JWT token for a validated user[cite: 89]."""
+    """Generates a JWT token for a validated user."""
     to_encode = data.copy()
     expire = datetime.utcnow() + timedelta(hours=ACCESS_TOKEN_EXPIRE_HOURS)
     to_encode.update({"exp": expire})
@@ -155,7 +155,7 @@ def create_access_token(data: dict):
 def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(database.get_db)):
     """
     The security 'guard'. Extract this into your routes to identify 
-    which bakery (tenant) is making the request[cite: 36, 66].
+    which bakery (tenant) is making the request.
     """
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -423,6 +423,44 @@ class FinishedGoodsLot(Base):
     
     tenant = relationship("Tenant")
     product = relationship("Product")
+
+class FinishedGoodsWasteLog(Base):
+    """Tracks unsold or damaged baked items (e.g., end-of-day bread waste)."""
+    __tablename__ = "finished_goods_waste_logs"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id"))
+    product_id = Column(Integer, ForeignKey("products.id"))
+    lot_id = Column(Integer, ForeignKey("finished_goods_lots.id"))
+    
+    quantity_wasted = Column(Integer)
+    reason = Column(String) # e.g., "Expired", "Dropped", "Donated" 
+    timestamp = Column(DateTime, default=datetime.utcnow)
+
+    # Link back to the specific production run to retrieve costs 
+    finished_goods_lot = relationship("FinishedGoodsLot")
+
+class OverheadExpense(Base):
+    """Fixed monthly costs like rent, hosting, and utilities."""
+    __tablename__ = "overhead_expenses"
+    
+    id = Column(Integer, primary_key=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id"))
+    name = Column(String) # e.g., "Kitchen Rent", "BakeryOS Subscription"
+    monthly_amount = Column(Float)
+    category = Column(String) # "Fixed", "Utility", "Subscription"
+
+class LaborLog(Base):
+    """Tracks labor time spent on specific production batches."""
+    __tablename__ = "labor_logs"
+    
+    id = Column(Integer, primary_key=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id"))
+    lot_id = Column(Integer, ForeignKey("finished_goods_lots.id"))
+    
+    hours_spent = Column(Float)
+    hourly_rate = Column(Float) # The wage of the baker for this specific batch
+    total_labor_cost = Column(Float) # Calculated as hours * rate
 
 ##############################
 
@@ -719,7 +757,7 @@ def login_for_access_token(
             detail="Incorrect username or password"
         )
     
-    # 3. Create the token [cite: 54]
+    # 3. Create the token 
     access_token = auth.create_access_token(data={"sub": user.username})
     return {"access_token": access_token, "token_type": "bearer"}
 
@@ -740,9 +778,17 @@ from sqlalchemy.orm import Session
 from sqlalchemy import desc
 import models, schemas
 
-def execute_production_run(db: Session, product_id: int, tenant_id: int, quantity_produced: int):
+def execute_production_run(
+    db: Session, 
+    product_id: int, 
+    tenant_id: int, 
+    quantity_produced: int, 
+    labor_hours: float = 0.0, 
+    hourly_rate: float = 0.0
+):
     """
     1. THE BAKE: Deducts raw ingredients and creates a batch of Finished Goods.
+    Now includes Labor and Overhead apportionment for true Net Margin analysis. 
     """
     product = db.query(models.Product).filter(models.Product.id == product_id).first()
     if not product:
@@ -751,26 +797,26 @@ def execute_production_run(db: Session, product_id: int, tenant_id: int, quantit
     total_cost_fifo = 0.0
     total_cost_newest = 0.0
     
-    # Deduct raw ingredients based on the recipe [cite: 93, 94]
+    # --- STEP 1: DEDUCT RAW INGREDIENTS (FIFO) ---
     for item in product.recipe_items:
-        total_qty_needed = item.quantity_required * quantity_produced
+        total_qty_needed = item.quantity_required * quantity_produced 
         
-        # Calculate newest replacement cost [cite: 94, 95]
+        # Calculate newest replacement cost for secondary margin view 
         newest_lot = db.query(models.IngredientLot)\
             .filter(models.IngredientLot.ingredient_id == item.ingredient_id)\
             .order_by(desc(models.IngredientLot.purchase_date)).first()
          
         if newest_lot:
-            cost_per_unit_newest = newest_lot.cost_total / newest_lot.quantity_purchased
-            total_cost_newest += (cost_per_unit_newest * total_qty_needed)
+            cost_per_unit_newest = newest_lot.cost_total / newest_lot.quantity_purchased 
+            total_cost_newest += (cost_per_unit_newest * total_qty_needed) 
 
-        # Deduct from oldest physical inventory (FIFO) [cite: 95, 96, 97]
+        # Deduct from oldest physical inventory lots
         remaining_to_deduct = total_qty_needed
         while remaining_to_deduct > 0:
             oldest_lot = db.query(models.IngredientLot)\
                 .filter(models.IngredientLot.ingredient_id == item.ingredient_id, 
                         models.IngredientLot.is_depleted == False)\
-                .order_by(models.IngredientLot.purchase_date).first()
+                .order_by(models.IngredientLot.purchase_date).first() 
             
             if not oldest_lot:
                 raise Exception(f"Out of stock: {item.ingredient.name}")
@@ -778,28 +824,63 @@ def execute_production_run(db: Session, product_id: int, tenant_id: int, quantit
             cost_per_unit_fifo = oldest_lot.cost_total / oldest_lot.quantity_purchased
              
             if oldest_lot.quantity_remaining >= remaining_to_deduct:
-                oldest_lot.quantity_remaining -= remaining_to_deduct
+                oldest_lot.quantity_remaining -= remaining_to_deduct 
                 total_cost_fifo += (cost_per_unit_fifo * remaining_to_deduct)
                 remaining_to_deduct = 0 
             else:
                 total_cost_fifo += (cost_per_unit_fifo * oldest_lot.quantity_remaining)
                 remaining_to_deduct -= oldest_lot.quantity_remaining
-                oldest_lot.quantity_remaining = 0
+                oldest_lot.quantity_remaining = 0 
                 oldest_lot.is_depleted = True
             
             db.flush()
-            
-    # Create the Finished Goods batch with the locked-in costs per individual pastry
+
+    # --- STEP 2: CALCULATE LABOR & OVERHEAD --- 
+    
+    # Calculate variable labor for this specific batch
+    batch_labor_total = labor_hours * hourly_rate
+    
+    # Apportion Fixed Overhead (e.g., Rent, Utilities)
+    # Strategy: Sum all monthly overhead and divide by a standard monthly volume (e.g., 2000 units)
+    # In a production system, this ensures every pastry "carries" its share of the rent.
+    monthly_overhead = db.query(func.sum(models.OverheadExpense.monthly_amount))\
+                         .filter(models.OverheadExpense.tenant_id == tenant_id).scalar() or 0.0
+    
+    # Assuming a standard denominator for apportionment; 
+    # alternatively, this can be dynamic based on previous month's total quantity_produced.
+    standard_monthly_volume = 2000 
+    overhead_per_unit = monthly_overhead / standard_monthly_volume
+
+    # --- STEP 3: CREATE THE FINISHED GOODS BATCH ---
+    
+    # Final unit cost = (Ingredient Cost + Labor Cost) / Total Quantity + Overhead Share
+    ingredient_cost_per_unit = total_cost_fifo / quantity_produced if quantity_produced > 0 else 0
+    labor_cost_per_unit = batch_labor_total / quantity_produced if quantity_produced > 0 else 0
+    
+    final_net_cost_per_unit = ingredient_cost_per_unit + labor_cost_per_unit + overhead_per_unit
+
     new_batch = models.FinishedGoodsLot(
         tenant_id=tenant_id,
         product_id=product_id,
         quantity_produced=quantity_produced,
         quantity_remaining=quantity_produced,
-        cost_per_unit_fifo=total_cost_fifo / quantity_produced if quantity_produced > 0 else 0,
+        # We store the final Net Cost as the cost_per_unit_fifo for margin accuracy
+        cost_per_unit_fifo=final_net_cost_per_unit,
         cost_per_unit_newest=total_cost_newest / quantity_produced if quantity_produced > 0 else 0
     )
     
     db.add(new_batch)
+    
+    # Log labor record for auditing
+    if labor_hours > 0:
+        db.add(models.LaborLog(
+            tenant_id=tenant_id,
+            lot_id=new_batch.id,
+            hours_spent=labor_hours,
+            hourly_rate=hourly_rate,
+            total_labor_cost=batch_labor_total
+        ))
+
     db.commit()
     return new_batch
 
@@ -838,7 +919,7 @@ def record_finished_goods_sale(db: Session, product_id: int, tenant_id: int, qua
             
         db.flush()
 
-    # Calculate final margins and log the sale [cite: 100, 101]
+    # Calculate final margins and log the sale 
     total_revenue = product.retail_price * quantity_sold
     margin_fifo = total_revenue - total_fifo_cost
     margin_newest = total_revenue - total_newest_cost
@@ -854,6 +935,65 @@ def record_finished_goods_sale(db: Session, product_id: int, tenant_id: int, qua
     db.add(new_log)
     db.commit()
     return new_log
+
+def log_finished_goods_waste(db: Session, lot_id: int, tenant_id: int, qty: int, reason: str):
+    lot = db.query(models.FinishedGoodsLot).filter(
+        models.FinishedGoodsLot.id == lot_id,
+        models.FinishedGoodsLot.tenant_id == tenant_id
+    ).first()
+
+    if not lot or lot.quantity_remaining < qty:
+        raise Exception("Not enough baked stock in this lot to waste.")
+
+    # Deduct from the specific batch
+    lot.quantity_remaining -= qty
+    if lot.quantity_remaining <= 0:
+        lot.is_depleted = True
+
+    new_waste = models.FinishedGoodsWasteLog(
+        tenant_id=tenant_id,
+        product_id=lot.product_id,
+        lot_id=lot.id,
+        quantity_wasted=qty,
+        reason=reason
+    )
+    db.add(new_waste)
+    db.commit()
+    return new_waste
+
+def record_finished_goods_waste(db: Session, lot_id: int, tenant_id: int, quantity_wasted: int, reason: str):
+    """
+    Deducts unsold baked goods from a specific batch and logs the loss.
+    """
+    # 1. Locate the specific batch
+    lot = db.query(models.FinishedGoodsLot).filter(
+        models.FinishedGoodsLot.id == lot_id,
+        models.FinishedGoodsLot.tenant_id == tenant_id
+    ).first()
+
+    if not lot:
+        raise Exception("Finished goods batch not found.")
+    
+    if lot.quantity_remaining < quantity_wasted:
+        raise Exception(f"Not enough stock in batch #{lot_id} to waste that amount.")
+
+    # 2. Deduct from the counter/inventory
+    lot.quantity_remaining -= quantity_wasted
+    if lot.quantity_remaining <= 0:
+        lot.is_depleted = True
+
+    # 3. Create the waste record
+    waste_entry = models.FinishedGoodsWasteLog(
+        tenant_id=tenant_id,
+        product_id=lot.product_id,
+        lot_id=lot.id,
+        quantity_wasted=quantity_wasted,
+        reason=reason
+    )
+    
+    db.add(waste_entry)
+    db.commit()
+    return waste_entry
 
 ##############################
 
@@ -1054,6 +1194,21 @@ class FinishedGoodsResponse(BaseModel):
     class Config:
         from_attributes = True
 
+class OverheadBase(BaseModel):
+    name: str
+    monthly_amount: float
+    category: str # e.g., "Fixed", "Subscription", "Utility"
+
+class OverheadCreate(OverheadBase):
+    pass
+
+class OverheadResponse(OverheadBase):
+    id: int
+    tenant_id: int
+
+    class Config:
+        from_attributes = True
+
 ##############################
 
 
@@ -1165,6 +1320,60 @@ def log_production_run(
 def get_ready_to_sell_inventory(db: Session = Depends(get_tenant_db)):
     # RLS ensures they only see their own baked goods
     return db.query(models.FinishedGoodsLot).filter(models.FinishedGoodsLot.is_depleted == False).all()
+
+@router.post("/log-waste")
+def log_finished_goods_waste(
+    lot_id: int, 
+    qty: int, 
+    reason: str,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_tenant_db)
+):
+    # Find the specific batch
+    lot = db.query(models.FinishedGoodsLot).filter(
+        models.FinishedGoodsLot.id == lot_id,
+        models.FinishedGoodsLot.tenant_id == current_user.tenant_id
+    ).first()
+
+    if not lot or lot.quantity_remaining < qty:
+        raise HTTPException(status_code=400, detail="Insufficient stock in this lot to waste.")
+
+    # Deduct from physical inventory
+    lot.quantity_remaining -= qty
+    if lot.quantity_remaining <= 0:
+        lot.is_depleted = True
+
+    new_waste = models.FinishedGoodsWasteLog(
+        tenant_id=current_user.tenant_id,
+        product_id=lot.product_id,
+        lot_id=lot.id,
+        quantity_wasted=qty,
+        reason=reason
+    )
+    db.add(new_waste)
+    db.commit()
+    return {"message": "Finished goods waste logged. Margins updated."}
+
+@router.post("/log-waste", response_model=schemas.FinishedGoodsResponse)
+def log_production_waste(
+    lot_id: int, 
+    qty: int, 
+    reason: str,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_tenant_db)
+):
+    try:
+        # Call the function we just defined in crud.py
+        waste_record = crud.record_finished_goods_waste(
+            db=db,
+            lot_id=lot_id,
+            tenant_id=current_user.tenant_id,
+            quantity_wasted=qty,
+            reason=reason
+        )
+        return waste_record
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 ##############################
 
@@ -1288,6 +1497,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 import database, crud, schemas, models, utils
 from auth import get_current_user, get_tenant_db, check_admin_or_owner
+from sqlalchemy import func
+from typing import List
 
 router = APIRouter(prefix="/sales", tags=["Sales"])
 
@@ -1315,23 +1526,125 @@ def get_product_margins(
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_user)
 ):
-    # Security Check
     check_admin_or_owner(current_user)
     
-    # Financial Query
-    stats = db.query(models.TransactionLog).filter(
+    # 1. Get Total Revenue and Ingredient Costs from Sales 
+    sales_data = db.query(
+        func.sum(models.TransactionLog.sale_price).label("revenue"),
+        func.sum(models.TransactionLog.sale_price - models.TransactionLog.margin_fifo).label("cogs")
+    ).filter(
         models.TransactionLog.product_id == product_id,
         models.TransactionLog.tenant_id == current_user.tenant_id
-    ).order_by(models.TransactionLog.timestamp.desc()).first()
-    
-    if not stats:
+    ).first()
+
+    # 2. Get Total Cost of Wasted Finished Goods
+    # We join with the Lot to get the cost_per_unit fixed at the time of baking 
+    waste_cost = db.query(
+        func.sum(models.FinishedGoodsWasteLog.quantity_wasted * models.FinishedGoodsLot.cost_per_unit_fifo)
+    ).join(models.FinishedGoodsLot).filter(
+        models.FinishedGoodsWasteLog.product_id == product_id,
+        models.FinishedGoodsWasteLog.tenant_id == current_user.tenant_id
+    ).scalar() or 0.0
+
+    if not sales_data.revenue:
         raise HTTPException(status_code=404, detail="No sales data found")
+
+    net_margin = sales_data.revenue - sales_data.cogs - waste_cost
         
     return {
-        "fifo_margin": stats.margin_fifo,
-        "newest_margin": stats.margin_newest,
-        "status": utils.get_margin_status(stats.margin_fifo, stats.margin_newest)
+        "gross_revenue": sales_data.revenue,
+        "net_margin": net_margin,
+        "waste_loss": waste_cost,
+        "status": "Warning: High Waste" if waste_cost > (sales_data.revenue * 0.1) else "Healthy"
     }
+
+@router.get("/financial-summary")
+def get_bakery_finances(
+    db: Session = Depends(get_tenant_db), 
+    current_user: models.User = Depends(get_current_user)
+):
+    check_admin_or_owner(current_user)
+
+    # 1. Calculate Gross Revenue and Ingredient/Labor Costs (COGS)
+    sales_query = db.query(
+        func.sum(models.TransactionLog.sale_price).label("revenue"),
+        func.sum(models.TransactionLog.sale_price - models.TransactionLog.margin_fifo).label("cogs")
+    ).filter(models.TransactionLog.tenant_id == current_user.tenant_id).first()
+
+    revenue = sales_query.revenue or 0.0
+    cogs = sales_query.cogs or 0.0
+
+    # 2. Total Waste Loss (Baked goods thrown away)
+    waste_loss = db.query(
+        func.sum(models.FinishedGoodsWasteLog.quantity_wasted * models.FinishedGoodsLot.cost_per_unit_fifo)
+    ).join(models.FinishedGoodsLot).filter(
+        models.FinishedGoodsWasteLog.tenant_id == current_user.tenant_id
+    ).scalar() or 0.0
+
+    # 3. Total Monthly Overhead (The "Lump Sum" you want to see deducted)
+    total_overhead = db.query(
+        func.sum(models.OverheadExpense.monthly_amount)
+    ).filter(models.OverheadExpense.tenant_id == current_user.tenant_id).scalar() or 0.0
+
+    # NEW FORMULA: Profit = Revenue - COGS - Waste - Total Overhead
+    net_profit = revenue - cogs - waste_loss - total_overhead
+
+    return {
+        "total_revenue": round(revenue, 2),
+        "total_waste_loss": round(waste_loss, 2),
+        "total_overhead": round(total_overhead, 2),
+        "net_profit": round(net_profit, 2)
+    }
+
+@router.get("/history")
+def get_transaction_history(
+    db: Session = Depends(get_tenant_db), 
+    current_user: models.User = Depends(get_current_user)
+):
+    # Join with Product table to get the name
+    transactions = db.query(
+        models.TransactionLog, 
+        models.Product.name
+    ).join(
+        models.Product, models.TransactionLog.product_id == models.Product.id
+    ).filter(
+        models.TransactionLog.tenant_id == current_user.tenant_id
+    ).order_by(models.TransactionLog.timestamp.desc()).all()
+
+    # Format the data for the frontend
+    return [{
+        "timestamp": t[0].timestamp,
+        "product_name": t[1],
+        "sale_price": t[0].sale_price,
+        "margin_fifo": t[0].margin_fifo
+    } for t in transactions]
+
+@router.get("/overhead", response_model=List[schemas.OverheadResponse])
+def list_overhead(db: Session = Depends(get_tenant_db)):
+    return db.query(models.OverheadExpense).all()
+
+@router.post("/overhead", response_model=schemas.OverheadResponse)
+def add_overhead(
+    expense: schemas.OverheadCreate, 
+    db: Session = Depends(get_tenant_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    new_exp = models.OverheadExpense(
+        tenant_id=current_user.tenant_id,
+        **expense.dict()
+    )
+    db.add(new_exp)
+    db.commit()
+    return new_exp
+
+@router.delete("/overhead/{expense_id}")
+def delete_overhead(expense_id: int, db: Session = Depends(get_tenant_db)):
+    exp = db.query(models.OverheadExpense).filter(models.OverheadExpense.id == expense_id).first()
+    if not exp:
+        raise HTTPException(status_code=404, detail="Expense not found")
+    db.delete(exp)
+    db.commit()
+    return {"message": "Deleted"}
 
 ##############################
 
@@ -1410,7 +1723,7 @@ def impersonate_user(user_id: int, db: Session = Depends(database.get_db)):
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     
-    # Generate a valid JWT token just like the normal login route does [cite: 89, 90]
+    # Generate a valid JWT token just like the normal login route does 
     access_token = auth.create_access_token(data={"sub": user.username})
     return {"access_token": access_token, "token_type": "bearer"}
 
@@ -1667,6 +1980,8 @@ FILE: frontend/index.html
                 <button onclick="showSection('inventory')" class="w-full text-left p-2 hover:bg-indigo-800 rounded">📦 Inventory</button>
                 <button onclick="showSection('products')" class="w-full text-left p-2 hover:bg-indigo-800 rounded">🥐 Products & POS</button>
                 <button onclick="showSection('orders')" class="w-full text-left p-2 hover:bg-indigo-800 rounded">📋 Custom Orders</button>
+                <button onclick="showSection('finances')" class="w-full text-left p-2 hover:bg-indigo-800 rounded">💰 Finances</button>
+                <button onclick="showSection('transactions')" class="w-full text-left p-2 hover:bg-indigo-800 rounded">📖 Ledger</button>
             </nav>
             <button onclick="logout()" class="p-4 bg-indigo-950 hover:bg-red-600 text-left font-bold">🚪 Logout</button>
         </aside>
@@ -1827,7 +2142,91 @@ FILE: frontend/index.html
                     </table>
                 </div>
             </section>
+            
+           <section id="section-finances" class="hidden space-y-6">
+               <h2 class="text-3xl font-bold">Financial Health</h2>
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
+                    <div class="bg-white p-6 rounded shadow border-l-4 border-green-500">
+                        <p class="text-sm text-gray-500 uppercase font-bold">Total Revenue</p>
+                        <p id="finance-revenue" class="text-2xl font-bold">$0.00</p>
+                    </div>
 
+                    <div class="bg-white p-6 rounded shadow border-l-4 border-orange-500">
+                        <p class="text-sm text-gray-500 uppercase font-bold">Waste Loss</p>
+                        <p id="finance-waste" class="text-2xl font-bold">-$0.00</p>
+                    </div>
+
+                    <div class="bg-white p-6 rounded shadow border-l-4 border-red-500">
+                        <p class="text-sm text-gray-500 uppercase font-bold">Fixed Overhead</p>
+                        <p id="finance-overhead" class="text-2xl font-bold text-red-600">-$0.00</p>
+                    </div>
+
+                    <div class="bg-white p-6 rounded shadow border-l-4 border-indigo-500">
+                        <p class="text-sm text-gray-500 uppercase font-bold">Net Profit</p>
+                        <p id="finance-profit" class="text-2xl font-bold text-indigo-700">$0.00</p>
+                    </div>
+                </div>
+
+                <div class="bg-white border rounded shadow p-6 mt-8">
+                    <div class="flex justify-between items-center mb-6">
+                        <div>
+                            <h3 class="text-xl font-bold">Monthly Overhead & Fixed Costs</h3>
+                            <p class="text-sm text-gray-500">Manage rent, utilities, and subscriptions to calculate true Net Margin.</p>
+                        </div>
+                        <button onclick="openAddExpenseModal()" class="bg-indigo-600 text-white px-4 py-2 rounded text-sm font-bold hover:bg-indigo-700 shadow-sm transition">
+                            + Add Expense
+                        </button>
+                    </div>
+                    
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left border-collapse">
+                            <thead>
+                                <tr class="bg-gray-50 text-xs uppercase text-gray-600 font-semibold">
+                                    <th class="p-3 border-b">Expense Name</th>
+                                    <th class="p-3 border-b">Monthly Amount</th>
+                                    <th class="p-3 border-b">Category</th>
+                                    <th class="p-3 border-b text-right">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="overhead-table-body" class="text-sm divide-y divide-gray-100">
+                                <tr class="text-gray-400 italic">
+                                    <td colspan="4" class="p-4 text-center">Loading expenses...</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    
+                    <div class="mt-4 p-4 bg-blue-50 border border-blue-100 rounded flex items-start space-x-3">
+                        <span class="text-blue-500 mt-0.5">ℹ️</span>
+                        <p class="text-xs text-blue-700 leading-relaxed">
+                            <strong>How this affects margins:</strong> Total monthly overhead is automatically apportioned across your production runs. 
+                            This ensures your "Net Profit" accounts for rent and bills, not just ingredients.
+                        </p>
+                    </div>
+                </div>
+            </section>
+
+            <section id="section-transactions" class="hidden space-y-6">
+                <div class="flex justify-between items-center">
+                    <h2 class="text-3xl font-bold">Transaction Ledger</h2>
+                    <button onclick="fetchTransactionHistory()" class="bg-blue-500 text-white px-4 py-2 rounded">Refresh</button>
+                </div>
+                
+                <div class="bg-white rounded shadow overflow-hidden">
+                    <table class="w-full text-left border-collapse">
+                        <thead>
+                            <tr class="bg-gray-100 text-sm">
+                                <tr class="bg-gray-100 text-sm">
+                                    <th class="p-3 border-b">Date & Time</th>
+                                    <th class="p-3 border-b">Product Name</th> <th class="p-3 border-b">Revenue</th>
+                                    <th class="p-3 border-b">Net Margin (FIFO)</th>
+                                </tr>
+                            </tr>
+                        </thead>
+                        <tbody id="transactions-table-body" class="text-sm"></tbody>
+                    </table>
+                </div>
+            </section>
         </main>
     </div>
 
@@ -1899,7 +2298,7 @@ function showDashboard() {
     document.getElementById('login-view').classList.remove('flex');
     document.getElementById('dashboard-view').classList.remove('hidden');
     
-    fetchUserInfo(); // <--- ADD THIS LINE HERE
+    fetchUserInfo();
     
     showSection('inventory'); 
 }
@@ -1910,6 +2309,11 @@ function showSection(sectionId) {
     if (sectionId === 'inventory') fetchStockLevels();
     if (sectionId === 'products') fetchProducts();
     if (sectionId === 'orders') fetchOrders();
+    if (sectionId === 'finances') { 
+        fetchFinances();
+        fetchOverheadExpenses();
+    }
+    if (sectionId === 'transactions') fetchTransactionHistory();
 }
 
 async function fetchUserInfo() {
@@ -2177,6 +2581,9 @@ async function fetchProducts() {
                             ${canSell ? '' : 'disabled'}>
                             🛒 Sell 1 Item
                         </button>
+                        <button onclick="logWaste(${p.id})" class="text-xs bg-orange-100 text-orange-800 p-1 rounded border border-orange-200 mt-2">
+                            🗑️ Mark Waste
+                        </button>
                     </div>
                 </div>
             `;
@@ -2315,6 +2722,133 @@ async function fetchOrders() {
             </tr>
         `).join('');
     } catch (err) { console.error(err); }
+}
+
+async function logWaste(lotId) {
+    const qty = prompt("How many items are being wasted?");
+    const reason = prompt("Reason (e.g., Expired, Dropped, Stale)?");
+
+    if (!qty || isNaN(qty)) return;
+
+    try {
+        const res = await fetch(`${API_URL}/production/log-waste?lot_id=${lotId}&qty=${qty}&reason=${reason}`, {
+            method: 'POST',
+            headers: getHeaders()
+        });
+
+        if (!res.ok) throw await res.json();
+
+        alert("Waste recorded successfully!");
+        fetchProducts(); // Refresh the POS display
+    } catch (err) {
+        alert("Error: " + (err.detail || "Could not log waste"));
+    }
+}
+
+async function fetchFinances() {
+    try {
+        const res = await fetch(`${API_URL}/sales/financial-summary`, { 
+            headers: getHeaders() 
+        });
+        
+        if (!res.ok) throw await res.json();
+        const data = await res.json();
+        
+        // Log to console so you can see it working in real-time
+        console.log("Updating Dashboard UI with:", data);
+
+        // Update the actual text on the screen
+        document.getElementById('finance-revenue').textContent = `$${data.total_revenue.toFixed(2)}`;
+        document.getElementById('finance-waste').textContent = `-$${data.total_waste_loss.toFixed(2)}`;
+        document.getElementById('finance-profit').textContent = `$${data.net_profit.toFixed(2)}`;
+        
+        // Line to show overhead deduction
+        if (document.getElementById('finance-overhead')) {
+            document.getElementById('finance-overhead').textContent = `-$${data.total_overhead.toFixed(2)}`;
+        }
+
+    } catch (err) {
+        console.error("Finance UI Update failed:", err);
+    }
+}
+
+async function fetchTransactionHistory() {
+    try {
+        const res = await fetch(`${API_URL}/sales/history`, { headers: getHeaders() });
+        const logs = await res.json();
+        
+        const tbody = document.getElementById('transactions-table-body');
+        tbody.innerHTML = logs.map(log => `
+            <tr class="hover:bg-gray-50">
+                <td class="p-3 border-b text-gray-500">${new Date(log.timestamp).toLocaleString()}</td>
+                <td class="p-3 border-b font-medium text-indigo-700">${log.product_name}</td>
+                <td class="p-3 border-b text-green-600 font-bold">$${log.sale_price.toFixed(2)}</td>
+                <td class="p-3 border-b text-indigo-600">$${log.margin_fifo.toFixed(2)}</td>
+            </tr>
+        `).join('');
+    } catch (err) {
+        console.error("Failed to load transactions", err);
+    }
+}
+
+async function fetchOverheadExpenses() {
+    try {
+        const res = await fetch(`${API_URL}/sales/overhead`, { headers: getHeaders() });
+        const expenses = await res.json();
+        
+        const tbody = document.getElementById('overhead-table-body');
+        tbody.innerHTML = expenses.map(exp => `
+            <tr class="hover:bg-gray-50 border-b">
+                <td class="p-3 font-medium">${exp.name}</td>
+                <td class="p-3 font-bold text-red-600">$${exp.monthly_amount.toFixed(2)}</td>
+                <td class="p-3"><span class="bg-gray-100 px-2 py-1 rounded text-xs text-gray-600 uppercase font-bold">${exp.category}</span></td>
+                <td class="p-3 text-right space-x-2">
+                    <button onclick="deleteExpense(${exp.id})" class="text-red-500 hover:text-red-700 text-xs font-bold">Delete</button>
+                </td>
+            </tr>
+        `).join('');
+    } catch (err) {
+        console.error("Failed to load overhead:", err);
+    }
+}
+
+async function openAddExpenseModal() {
+    const name = prompt("Expense Name (e.g., Kitchen Rent):");
+    const amount = prompt("Monthly Amount ($):");
+    const category = prompt("Category (Fixed, Subscription, Utility):");
+
+    if (!name || !amount || isNaN(amount)) return;
+
+    try {
+        const res = await fetch(`${API_URL}/sales/overhead`, {
+            method: 'POST',
+            headers: getHeaders(),
+            body: JSON.stringify({ name, monthly_amount: parseFloat(amount), category })
+        });
+        
+        if (!res.ok) throw await res.json();
+        alert("Overhead expense added!");
+        fetchOverheadExpenses();
+        fetchFinances(); // Refresh total net profit
+    } catch (err) {
+        alert("Error: " + (err.detail || "Failed to add expense"));
+    }
+}
+
+async function deleteExpense(id) {
+    if (!confirm("Remove this expense?")) return;
+    try {
+        const res = await fetch(`${API_URL}/sales/overhead/${id}`, {
+            method: 'DELETE',
+            headers: getHeaders()
+        });
+        if (res.ok) {
+            fetchOverheadExpenses();
+            fetchFinances();
+        }
+    } catch (err) {
+        console.error("Delete failed:", err);
+    }
 }
 
 ##############################
