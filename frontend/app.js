@@ -289,24 +289,89 @@ document.getElementById('add-product-form').addEventListener('submit', async (e)
 
 async function fetchProducts() {
     try {
-        const res = await fetch(`${API_URL}/products/list`, { headers: getHeaders() });
-        if (res.status === 401) return logout();
-        const products = await res.json();
+        // 1. Fetch the master product catalog (Recipes)
+        const prodRes = await fetch(`${API_URL}/products/list`, { headers: getHeaders() });
+        if (prodRes.status === 401) return logout();
+        const products = await prodRes.json();
+
+        // 2. Fetch the active Finished Goods (Baked Inventory)
+        const invRes = await fetch(`${API_URL}/production/finished-inventory`, { headers: getHeaders() });
+        const finishedGoods = await invRes.json();
+
+        // 3. Group the baked inventory by product ID so we know how many of each are on the counter
+        const stockMap = {};
+        finishedGoods.forEach(fg => {
+            stockMap[fg.product_id] = (stockMap[fg.product_id] || 0) + fg.quantity_remaining;
+        });
         
         const grid = document.getElementById('products-grid');
-        grid.innerHTML = products.map(p => `
-            <div class="bg-white p-4 rounded shadow border border-gray-100 flex flex-col justify-between">
-                <div>
-                    <span class="text-xs text-gray-400">ID: #${p.id}</span>
-                    <h3 class="font-bold text-lg text-indigo-700">${p.name}</h3>
-                    <p class="text-2xl mt-2 mb-4 font-light">$${p.retail_price.toFixed(2)}</p>
+        grid.innerHTML = products.map(p => {
+            const bakedStock = stockMap[p.id] || 0;
+            const canSell = bakedStock > 0;
+
+            return `
+                <div class="bg-white p-4 rounded shadow border border-gray-100 flex flex-col justify-between">
+                    <div>
+                        <div class="flex justify-between items-center mb-2">
+                            <span class="text-xs text-gray-400">ID: #${p.id}</span>
+                            <span class="px-2 py-1 ${canSell ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'} text-xs rounded-full font-bold border ${canSell ? 'border-green-200' : 'border-red-200'}">
+                                🥯 Baked Stock: ${bakedStock}
+                            </span>
+                        </div>
+                        <h3 class="font-bold text-lg text-indigo-700">${p.name}</h3>
+                        <p class="text-2xl mt-1 mb-4 font-light">$${p.retail_price.toFixed(2)}</p>
+                    </div>
+
+                    <div class="space-y-3 pt-4 border-t border-gray-100">
+                        <div class="flex space-x-2">
+                            <input type="number" id="bake-qty-${p.id}" placeholder="Qty" class="w-1/3 p-2 border rounded text-sm bg-gray-50" min="1" value="10">
+                            <button onclick="bakeProduct(${p.id})" class="w-2/3 bg-indigo-500 text-white p-2 rounded hover:bg-indigo-600 transition font-bold text-sm">
+                                👨‍🍳 Bake Batch
+                            </button>
+                        </div>
+                        
+                        <button onclick="recordSale(${p.id}, ${p.retail_price})" 
+                            class="w-full ${canSell ? 'bg-green-500 hover:bg-green-600' : 'bg-gray-300 cursor-not-allowed'} text-white p-3 rounded transition font-bold text-lg shadow-sm" 
+                            ${canSell ? '' : 'disabled'}>
+                            🛒 Sell 1 Item
+                        </button>
+                    </div>
                 </div>
-                <button onclick="recordSale(${p.id}, ${p.retail_price})" class="w-full bg-green-500 text-white p-2 rounded hover:bg-green-600 transition font-bold">
-                    Sell 1 Item
-                </button>
-            </div>
-        `).join('');
-    } catch (err) { console.error(err); }
+            `;
+        }).join('');
+    } catch (err) { console.error("Error loading products/inventory:", err); }
+}
+
+async function bakeProduct(productId) {
+    const qtyInput = document.getElementById(`bake-qty-${productId}`);
+    const qty = parseInt(qtyInput.value);
+    
+    if (!qty || qty <= 0) {
+        alert("Please enter a valid quantity to bake.");
+        return;
+    }
+
+    try {
+        const res = await fetch(`${API_URL}/production/run`, {
+            method: 'POST',
+            headers: getHeaders(),
+            body: JSON.stringify({ product_id: productId, quantity_produced: qty })
+        });
+
+        if (!res.ok) {
+            const err = await res.json();
+            throw new Error(err.detail || "Failed to bake product.");
+        }
+
+        alert(`Successfully baked ${qty} items! Raw ingredients have been deducted.`);
+        
+        // Refresh views to show the new baked stock and lower raw ingredient stock
+        fetchProducts(); 
+        fetchStockLevels(); 
+
+    } catch (err) {
+        alert(`Baking Error: ${err.message}`);
+    }
 }
 
 async function recordSale(productId, price) {
@@ -318,13 +383,18 @@ async function recordSale(productId, price) {
             body: JSON.stringify({ item_id: productId, quantity: 1, price: price })
         });
         const data = await res.json();
+        
         if (!res.ok) throw data;
 
-        alertBox.className = 'mb-4 p-4 rounded text-white font-bold bg-green-500 block';
-        alertBox.innerHTML = `Sale Recorded! Rev: $${data.sale_price.toFixed(2)} | FIFO Margin: $${data.margin_fifo.toFixed(2)}`;
+        alertBox.className = 'mb-4 p-4 rounded text-white font-bold bg-green-500 block shadow';
+        alertBox.innerHTML = `✅ Sale Recorded! Rev: $${data.sale_price.toFixed(2)} | FIFO Margin: $${data.margin_fifo.toFixed(2)}`;
+        
+        // Refresh the POS grid so the "Baked Stock" badge decrements instantly
+        fetchProducts(); 
+
     } catch (err) {
-        alertBox.className = 'mb-4 p-4 rounded text-white font-bold bg-red-500 block';
-        alertBox.textContent = `Sale Failed: ${err.detail || "Error"}`;
+        alertBox.className = 'mb-4 p-4 rounded text-white font-bold bg-red-500 block shadow';
+        alertBox.textContent = `❌ Sale Failed: ${err.detail || "Error processing transaction"}`;
     }
 }
 

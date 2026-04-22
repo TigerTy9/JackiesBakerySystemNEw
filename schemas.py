@@ -150,3 +150,18 @@ class IngredientStockResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+class ProductionRunCreate(BaseModel):
+    product_id: int
+    quantity_produced: int
+
+class FinishedGoodsResponse(BaseModel):
+    id: int
+    product_id: int
+    quantity_produced: int
+    quantity_remaining: int
+    production_date: datetime
+    is_depleted: bool
+
+    class Config:
+        from_attributes = True

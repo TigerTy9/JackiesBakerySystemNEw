@@ -12,16 +12,15 @@ def record_sale(
     db: Session = Depends(get_tenant_db) 
 ):
     try:
-        # This returns a TransactionLog object
-        result = crud.process_bake_and_calculate_margins(
-            db, 
+        # This now subtracts from Finished Goods instead of raw ingredients
+        result = crud.record_finished_goods_sale(
+            db=db, 
             product_id=sale.item_id, 
             tenant_id=current_user.tenant_id,
             quantity_sold=sale.quantity 
         )
         return result
     except Exception as e:
-        # If this is hit, you will see a 400 error in your logs
         raise HTTPException(status_code=400, detail=str(e))
     
 @router.get("/margins/{product_id}")

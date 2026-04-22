@@ -2,7 +2,7 @@
 from fastapi import FastAPI, Depends, HTTPException, status
 from database import engine, get_db
 import models
-from routers import inventory, sales, tenants, orders, recipes, admin
+from routers import inventory, sales, tenants, orders, recipes, admin, production
 from fastapi.security import OAuth2PasswordRequestForm
 import auth
 from sqlalchemy.orm import Session
@@ -27,6 +27,7 @@ app.include_router(sales.router)     # For the POS/Auto-subtract logic
 app.include_router(orders.router)    # For Orders & Production Planning
 app.include_router(recipes.router)   # For managing product recipes
 app.include_router(admin.router)     # For your super admin tasks (like listing all tenants)
+app.include_router(production.router) # For logging production runs and managing finished goods inventory
 @app.get("/")
 def health_check():
     return {"status": "active", "system": "BakeryOS"}

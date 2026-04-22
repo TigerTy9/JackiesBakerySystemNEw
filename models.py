@@ -154,7 +154,7 @@ class CustomOrder(Base):
     customer_email = Column(String, nullable=True)
     description = Column(String) # e.g., "3-Tier Vanilla Cake with Floral Piping"
     items = relationship("CustomOrderItem", back_populates="custom_order")
-    
+
     # Financials
     total_price = Column(Float, nullable=True) # Starts null until quote is given
     deposit_amount = Column(Float, default=0.0)
@@ -166,3 +166,24 @@ class CustomOrder(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     tenant = relationship("Tenant")
+
+class FinishedGoodsLot(Base):
+    """Tracks daily batches of baked items ready for sale."""
+    __tablename__ = "finished_goods_lots"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id"))
+    product_id = Column(Integer, ForeignKey("products.id"))
+    
+    quantity_produced = Column(Integer)
+    quantity_remaining = Column(Integer) # Deducted when sold
+    
+    # We lock in the calculated ingredient cost at the exact moment of baking
+    cost_per_unit_fifo = Column(Float) 
+    cost_per_unit_newest = Column(Float)
+    
+    production_date = Column(DateTime, default=datetime.utcnow)
+    is_depleted = Column(Boolean, default=False)
+    
+    tenant = relationship("Tenant")
+    product = relationship("Product")
