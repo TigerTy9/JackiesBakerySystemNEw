@@ -50,7 +50,6 @@ class TenantResponse(BaseModel):
         from_attributes = True # Allows Pydantic to read SQLAlchemy models
 
 class IngredientCreate(BaseModel):
-    tenant_id: int
     name: str
     base_unit: str
     is_non_food: bool = False

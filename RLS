@@ -1,0 +1,10 @@
+-- 1. Enable RLS on the table
+ALTER TABLE ingredients ENABLE ROW LEVEL SECURITY;
+
+-- 2. Force RLS (Ensures ty_admin doesn't accidentally bypass it)
+ALTER TABLE ingredients FORCE ROW LEVEL SECURITY;
+
+-- 3. Create the Policy
+-- This tells Postgres: "Only return rows where the tenant_id matches the current session's app.tenant_id"
+CREATE POLICY tenant_isolation_policy ON ingredients 
+USING (tenant_id = NULLIF(current_setting('app.tenant_id', TRUE), '')::integer);

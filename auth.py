@@ -5,6 +5,7 @@ from passlib.context import CryptContext
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 
 # Internal imports from your project structure [cite: 1, 9, 75]
 import database, models
@@ -66,3 +67,16 @@ def check_admin_or_owner(current_user: models.User):
             detail="Operation restricted to Owners/Admins"
         )
     return True
+
+def get_tenant_db(
+    current_user: models.User = Depends(get_current_user), 
+    db: Session = Depends(database.get_db)
+):
+    """
+    SaaS Security Layer: Injects the tenant_id into the PostgreSQL session.
+    RLS will automatically filter all subsequent queries in this transaction.
+    """
+    # SET LOCAL only lasts for the duration of this specific database transaction
+    db.execute(text(f"SET LOCAL app.tenant_id = '{current_user.tenant_id}'"))
+    
+    return db
