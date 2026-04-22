@@ -335,6 +335,9 @@ async function fetchProducts() {
                             ${canSell ? '' : 'disabled'}>
                             🛒 Sell 1 Item
                         </button>
+                        <button onclick="logWaste(${p.id})" class="text-xs bg-orange-100 text-orange-800 p-1 rounded border border-orange-200 mt-2">
+                            🗑️ Mark Waste
+                        </button>
                     </div>
                 </div>
             `;
@@ -473,4 +476,25 @@ async function fetchOrders() {
             </tr>
         `).join('');
     } catch (err) { console.error(err); }
+}
+
+async function logWaste(lotId) {
+    const qty = prompt("How many items are being wasted?");
+    const reason = prompt("Reason (e.g., Expired, Dropped, Stale)?");
+
+    if (!qty || isNaN(qty)) return;
+
+    try {
+        const res = await fetch(`${API_URL}/production/log-waste?lot_id=${lotId}&qty=${qty}&reason=${reason}`, {
+            method: 'POST',
+            headers: getHeaders()
+        });
+
+        if (!res.ok) throw await res.json();
+
+        alert("Waste recorded successfully!");
+        fetchProducts(); // Refresh the POS display [cite: 254, 272]
+    } catch (err) {
+        alert("Error: " + (err.detail || "Could not log waste"));
+    }
 }

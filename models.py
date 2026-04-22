@@ -187,3 +187,19 @@ class FinishedGoodsLot(Base):
     
     tenant = relationship("Tenant")
     product = relationship("Product")
+
+class FinishedGoodsWasteLog(Base):
+    """Tracks unsold or damaged baked items (e.g., end-of-day bread waste)."""
+    __tablename__ = "finished_goods_waste_logs"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id"))
+    product_id = Column(Integer, ForeignKey("products.id"))
+    lot_id = Column(Integer, ForeignKey("finished_goods_lots.id"))
+    
+    quantity_wasted = Column(Integer)
+    reason = Column(String) # e.g., "Expired", "Dropped", "Donated" [cite: 19]
+    timestamp = Column(DateTime, default=datetime.utcnow)
+
+    # Link back to the specific production run to retrieve costs 
+    finished_goods_lot = relationship("FinishedGoodsLot")

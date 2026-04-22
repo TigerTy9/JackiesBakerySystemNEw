@@ -29,20 +29,34 @@ def get_product_margins(
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_user)
 ):
-    # Security Check
     check_admin_or_owner(current_user)
     
-    # Financial Query
-    stats = db.query(models.TransactionLog).filter(
+    # 1. Get Total Revenue and Ingredient Costs from Sales [cite: 116, 140]
+    sales_data = db.query(
+        func.sum(models.TransactionLog.sale_price).label("revenue"),
+        func.sum(models.TransactionLog.sale_price - models.TransactionLog.margin_fifo).label("cogs")
+    ).filter(
         models.TransactionLog.product_id == product_id,
         models.TransactionLog.tenant_id == current_user.tenant_id
-    ).order_by(models.TransactionLog.timestamp.desc()).first()
-    
-    if not stats:
+    ).first()
+
+    # 2. Get Total Cost of Wasted Finished Goods
+    # We join with the Lot to get the cost_per_unit fixed at the time of baking 
+    waste_cost = db.query(
+        func.sum(models.FinishedGoodsWasteLog.quantity_wasted * models.FinishedGoodsLot.cost_per_unit_fifo)
+    ).join(models.FinishedGoodsLot).filter(
+        models.FinishedGoodsWasteLog.product_id == product_id,
+        models.FinishedGoodsWasteLog.tenant_id == current_user.tenant_id
+    ).scalar() or 0.0
+
+    if not sales_data.revenue:
         raise HTTPException(status_code=404, detail="No sales data found")
+
+    net_margin = sales_data.revenue - sales_data.cogs - waste_cost
         
     return {
-        "fifo_margin": stats.margin_fifo,
-        "newest_margin": stats.margin_newest,
-        "status": utils.get_margin_status(stats.margin_fifo, stats.margin_newest)
+        "gross_revenue": sales_data.revenue,
+        "net_margin": net_margin,
+        "waste_loss": waste_cost,
+        "status": "Warning: High Waste" if waste_cost > (sales_data.revenue * 0.1) else "Healthy"
     }

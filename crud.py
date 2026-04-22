@@ -116,3 +116,62 @@ def record_finished_goods_sale(db: Session, product_id: int, tenant_id: int, qua
     db.add(new_log)
     db.commit()
     return new_log
+
+def log_finished_goods_waste(db: Session, lot_id: int, tenant_id: int, qty: int, reason: str):
+    lot = db.query(models.FinishedGoodsLot).filter(
+        models.FinishedGoodsLot.id == lot_id,
+        models.FinishedGoodsLot.tenant_id == tenant_id
+    ).first()
+
+    if not lot or lot.quantity_remaining < qty:
+        raise Exception("Not enough baked stock in this lot to waste.")
+
+    # Deduct from the specific batch
+    lot.quantity_remaining -= qty
+    if lot.quantity_remaining <= 0:
+        lot.is_depleted = True
+
+    new_waste = models.FinishedGoodsWasteLog(
+        tenant_id=tenant_id,
+        product_id=lot.product_id,
+        lot_id=lot.id,
+        quantity_wasted=qty,
+        reason=reason
+    )
+    db.add(new_waste)
+    db.commit()
+    return new_waste
+
+def record_finished_goods_waste(db: Session, lot_id: int, tenant_id: int, quantity_wasted: int, reason: str):
+    """
+    Deducts unsold baked goods from a specific batch and logs the loss.
+    """
+    # 1. Locate the specific batch
+    lot = db.query(models.FinishedGoodsLot).filter(
+        models.FinishedGoodsLot.id == lot_id,
+        models.FinishedGoodsLot.tenant_id == tenant_id
+    ).first()
+
+    if not lot:
+        raise Exception("Finished goods batch not found.")
+    
+    if lot.quantity_remaining < quantity_wasted:
+        raise Exception(f"Not enough stock in batch #{lot_id} to waste that amount.")
+
+    # 2. Deduct from the counter/inventory
+    lot.quantity_remaining -= quantity_wasted
+    if lot.quantity_remaining <= 0:
+        lot.is_depleted = True
+
+    # 3. Create the waste record
+    waste_entry = models.FinishedGoodsWasteLog(
+        tenant_id=tenant_id,
+        product_id=lot.product_id,
+        lot_id=lot.id,
+        quantity_wasted=quantity_wasted,
+        reason=reason
+    )
+    
+    db.add(waste_entry)
+    db.commit()
+    return waste_entry
