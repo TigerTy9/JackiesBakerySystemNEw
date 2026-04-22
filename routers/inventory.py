@@ -78,7 +78,8 @@ def add_ingredient(ingredient: schemas.IngredientCreate, db: Session = Depends(d
     new_ingredient = models.Ingredient(
         tenant_id=ingredient.tenant_id,
         name=ingredient.name,
-        base_unit=ingredient.base_unit  # Should be 'grams', 'ml', or 'units'
+        base_unit=ingredient.base_unit,  # Should be 'grams', 'ml', or 'units'
+        is_non_food=ingredient.is_non_food
     )
     db.add(new_ingredient)
     db.commit()

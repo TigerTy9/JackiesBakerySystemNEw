@@ -9,6 +9,7 @@ class IngredientBase(BaseModel):
 class RecipeItemCreate(BaseModel):
     ingredient_id: int
     quantity_required: float
+    is_non_food: bool = False
 
 class ProductCreate(BaseModel):
     name: str
@@ -52,12 +53,14 @@ class IngredientCreate(BaseModel):
     tenant_id: int
     name: str
     base_unit: str
+    is_non_food: bool = False
 
 class IngredientResponse(BaseModel):
     id: int
     tenant_id: int
     name: str
     base_unit: str
+    is_non_food: bool
 
     class Config:
         from_attributes = True

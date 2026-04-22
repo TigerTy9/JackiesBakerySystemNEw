@@ -58,3 +58,11 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     if user is None:
         raise credentials_exception
     return user
+
+def check_admin_or_owner(current_user: models.User):
+    if current_user.role not in ["admin", "owner"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Operation restricted to Owners/Admins"
+        )
+    return True

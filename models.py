@@ -47,7 +47,8 @@ class Ingredient(Base):
     tenant_id = Column(Integer, ForeignKey("tenants.id"))
     name = Column(String) 
     base_unit = Column(String) # Always standard: "grams", "milliliters", or "units"
-    
+    is_non_food = Column(Boolean, default=False)
+
     tenant = relationship("Tenant", back_populates="ingredients")
     lots = relationship("IngredientLot", back_populates="ingredient")
 

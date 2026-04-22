@@ -166,6 +166,14 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
         raise credentials_exception
     return user
 
+def check_admin_or_owner(current_user: models.User):
+    if current_user.role not in ["admin", "owner"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Operation restricted to Owners/Admins"
+        )
+    return True
+
 ##############################
 
 
@@ -253,7 +261,8 @@ class Ingredient(Base):
     tenant_id = Column(Integer, ForeignKey("tenants.id"))
     name = Column(String) 
     base_unit = Column(String) # Always standard: "grams", "milliliters", or "units"
-    
+    is_non_food = Column(Boolean, default=False)
+
     tenant = relationship("Tenant", back_populates="ingredients")
     lots = relationship("IngredientLot", back_populates="ingredient")
 
@@ -669,6 +678,7 @@ class IngredientBase(BaseModel):
 class RecipeItemCreate(BaseModel):
     ingredient_id: int
     quantity_required: float
+    is_non_food: bool = False
 
 class ProductCreate(BaseModel):
     name: str
@@ -712,12 +722,14 @@ class IngredientCreate(BaseModel):
     tenant_id: int
     name: str
     base_unit: str
+    is_non_food: bool = False
 
 class IngredientResponse(BaseModel):
     id: int
     tenant_id: int
     name: str
     base_unit: str
+    is_non_food: bool
 
     class Config:
         from_attributes = True
@@ -841,7 +853,8 @@ FILE: routers/sales.py
 ----------------------
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-import database, crud, schemas
+import database, crud, schemas, models
+from auth import get_current_user, check_admin_or_owner
 
 router = APIRouter(prefix="/sales", tags=["Sales"])
 
@@ -851,6 +864,30 @@ def record_sale(sale: schemas.SaleCreate, db: Session = Depends(database.get_db)
         return crud.process_bake_and_calculate_margins(db, sale.product_id, sale.tenant_id)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+    
+@router.get("/margins/{product_id}")
+def get_product_margins(
+    product_id: int, 
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    # Security Check
+    check_admin_or_owner(current_user)
+    
+    # Financial Query
+    stats = db.query(models.TransactionLog).filter(
+        models.TransactionLog.product_id == product_id,
+        models.TransactionLog.tenant_id == current_user.tenant_id
+    ).order_by(models.TransactionLog.timestamp.desc()).first()
+    
+    if not stats:
+        raise HTTPException(status_code=404, detail="No sales data found")
+        
+    return {
+        "fifo_margin": stats.margin_fifo,
+        "newest_margin": stats.margin_newest,
+        "status": utils.get_margin_status(stats.margin_fifo, stats.margin_newest)
+    }
 
 ##############################
 
@@ -961,7 +998,8 @@ def add_ingredient(ingredient: schemas.IngredientCreate, db: Session = Depends(d
     new_ingredient = models.Ingredient(
         tenant_id=ingredient.tenant_id,
         name=ingredient.name,
-        base_unit=ingredient.base_unit  # Should be 'grams', 'ml', or 'units'
+        base_unit=ingredient.base_unit,  # Should be 'grams', 'ml', or 'units'
+        is_non_food=ingredient.is_non_food
     )
     db.add(new_ingredient)
     db.commit()
