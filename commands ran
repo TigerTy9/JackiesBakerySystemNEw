@@ -46,3 +46,17 @@ docker compose build
 
 # 3. Start everything back up
 docker compose up
+
+{
+  "customer_name": "Zach",
+  "customer_email": "zach@example.com",
+  "description": "Large catering order for study group",
+  "delivery_date": "2026-05-01T14:00:00Z",
+  "items": [
+    {
+      "product_id": 1,
+      "quantity": 50,
+      "price_override": 6.50
+    }
+  ]
+}

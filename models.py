@@ -1,6 +1,8 @@
 from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Boolean
 from sqlalchemy.orm import declarative_base, relationship
 from datetime import datetime
+import enum
+from sqlalchemy import Enum as SQLEnum
 
 Base = declarative_base()
 
@@ -116,3 +118,51 @@ class UnitConversion(Base):
     from_unit = Column(String) # e.g., "50lb Bag"
     to_unit = Column(String)   # e.g., "grams"
     multiplier = Column(Float)  # e.g., 22679.6
+
+class OrderStatus(str, enum.Enum):
+    PENDING_QUOTE = "Quote Pending"
+    DEPOSIT_PAID = "Deposit Paid"
+    BAKING_SCHEDULED = "Baking Scheduled"
+    READY = "Ready for Pickup"
+    COMPLETED = "Completed"
+    CANCELLED = "Cancelled"
+
+class CustomOrderItem(Base):
+    """Links multiple products to a single custom order."""
+    __tablename__ = "custom_order_items"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    custom_order_id = Column(Integer, ForeignKey("custom_orders.id"))
+    product_id = Column(Integer, ForeignKey("products.id"))
+    
+    quantity = Column(Integer, default=1)
+    
+    # Custom orders often have negotiated prices that differ from retail
+    price_override = Column(Float, nullable=True) 
+
+    custom_order = relationship("CustomOrder", back_populates="items")
+    product = relationship("Product")
+
+class CustomOrder(Base):
+    """Pipeline for complex, non-standard baked goods like wedding cakes."""
+    __tablename__ = "custom_orders"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id"))
+    
+    customer_name = Column(String)
+    customer_email = Column(String, nullable=True)
+    description = Column(String) # e.g., "3-Tier Vanilla Cake with Floral Piping"
+    items = relationship("CustomOrderItem", back_populates="custom_order")
+    
+    # Financials
+    total_price = Column(Float, nullable=True) # Starts null until quote is given
+    deposit_amount = Column(Float, default=0.0)
+    
+    # Workflow State
+    status = Column(SQLEnum(OrderStatus), default=OrderStatus.PENDING_QUOTE)
+    
+    delivery_date = Column(DateTime)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    tenant = relationship("Tenant")

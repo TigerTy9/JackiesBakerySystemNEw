@@ -17,12 +17,17 @@ JackiesBakerySystemNEw/
     Dockerfile
     schemas.py
     routers/
+        orders.py
         __init__.py
         recipes.py
         tenants.py
         sales.py
         admin.py
         inventory.py
+    frontend/
+        index.html
+        app.js
+        admin.html
 
 ==================================================
 FILE CONTENTS:
@@ -230,6 +235,8 @@ FILE: models.py
 from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Boolean
 from sqlalchemy.orm import declarative_base, relationship
 from datetime import datetime
+import enum
+from sqlalchemy import Enum as SQLEnum
 
 Base = declarative_base()
 
@@ -346,6 +353,54 @@ class UnitConversion(Base):
     to_unit = Column(String)   # e.g., "grams"
     multiplier = Column(Float)  # e.g., 22679.6
 
+class OrderStatus(str, enum.Enum):
+    PENDING_QUOTE = "Quote Pending"
+    DEPOSIT_PAID = "Deposit Paid"
+    BAKING_SCHEDULED = "Baking Scheduled"
+    READY = "Ready for Pickup"
+    COMPLETED = "Completed"
+    CANCELLED = "Cancelled"
+
+class CustomOrderItem(Base):
+    """Links multiple products to a single custom order."""
+    __tablename__ = "custom_order_items"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    custom_order_id = Column(Integer, ForeignKey("custom_orders.id"))
+    product_id = Column(Integer, ForeignKey("products.id"))
+    
+    quantity = Column(Integer, default=1)
+    
+    # Custom orders often have negotiated prices that differ from retail
+    price_override = Column(Float, nullable=True) 
+
+    custom_order = relationship("CustomOrder", back_populates="items")
+    product = relationship("Product")
+
+class CustomOrder(Base):
+    """Pipeline for complex, non-standard baked goods like wedding cakes."""
+    __tablename__ = "custom_orders"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id"))
+    
+    customer_name = Column(String)
+    customer_email = Column(String, nullable=True)
+    description = Column(String) # e.g., "3-Tier Vanilla Cake with Floral Piping"
+    items = relationship("CustomOrderItem", back_populates="custom_order")
+    
+    # Financials
+    total_price = Column(Float, nullable=True) # Starts null until quote is given
+    deposit_amount = Column(Float, default=0.0)
+    
+    # Workflow State
+    status = Column(SQLEnum(OrderStatus), default=OrderStatus.PENDING_QUOTE)
+    
+    delivery_date = Column(DateTime)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    tenant = relationship("Tenant")
+
 ##############################
 
 
@@ -369,6 +424,7 @@ FILE: passwords.txt
 -------------------
 westen6growling9crystals6truly4renee3turning9vile6igni
 
+westen6growling9crystals6truly4renee3turning9vile6ignited2police
 
 ##############################
 
@@ -423,6 +479,20 @@ docker compose build
 
 # 3. Start everything back up
 docker compose up
+
+{
+  "customer_name": "Zach",
+  "customer_email": "zach@example.com",
+  "description": "Large catering order for study group",
+  "delivery_date": "2026-05-01T14:00:00Z",
+  "items": [
+    {
+      "product_id": 1,
+      "quantity": 50,
+      "price_override": 6.50
+    }
+  ]
+}
 
 ##############################
 
@@ -558,20 +628,31 @@ FILE: main.py
 from fastapi import FastAPI, Depends, HTTPException, status
 from database import engine, get_db
 import models
-from routers import inventory, sales, tenants
+from routers import inventory, sales, tenants, orders, recipes, admin
 from fastapi.security import OAuth2PasswordRequestForm
 import auth
 from sqlalchemy.orm import Session
+from fastapi.middleware.cors import CORSMiddleware
 
 # This line creates the actual PostgreSQL tables if they don't exist
 models.Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="BakeryOS SaaS")
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allows all origins (good for local HTML testing)
+    allow_credentials=True,
+    allow_methods=["*"],  # Allows all methods (GET, POST, etc.)
+    allow_headers=["*"],  # Allows all headers (like Authorization)
+)
+
 app.include_router(tenants.router)   # For you to add new clients
 app.include_router(inventory.router) # For the baker to add flour/sugar
 app.include_router(sales.router)     # For the POS/Auto-subtract logic
-
+app.include_router(orders.router)    # For Orders & Production Planning
+app.include_router(recipes.router)   # For managing product recipes
+app.include_router(admin.router)     # For your super admin tasks (like listing all tenants)
 @app.get("/")
 def health_check():
     return {"status": "active", "system": "BakeryOS"}
@@ -595,6 +676,14 @@ def login_for_access_token(
     access_token = auth.create_access_token(data={"sub": user.username})
     return {"access_token": access_token, "token_type": "bearer"}
 
+@app.get("/users/me")
+def get_current_user_info(current_user: models.User = Depends(auth.get_current_user)):
+    return {
+        "username": current_user.username,
+        "role": current_user.role,
+        "business_name": current_user.tenant.business_name
+    }
+
 ##############################
 
 
@@ -604,60 +693,75 @@ from sqlalchemy.orm import Session
 from sqlalchemy import desc
 import models, schemas
 
-def process_bake_and_calculate_margins(db: Session, product_id: int, tenant_id: int):
+def process_bake_and_calculate_margins(db: Session, product_id: int, tenant_id: int, quantity_sold: int = 1):
+    """
+    Processes a bake/sale by deducting raw ingredients from lots using FIFO logic.
+    Calculates margins based on both the oldest and newest purchase costs.
+    """
     product = db.query(models.Product).filter(models.Product.id == product_id).first()
+    if not product:
+        raise Exception("Product not found")
     
     total_cost_fifo = 0.0
     total_cost_newest = 0.0
     
-    # 1. Loop through every ingredient in the recipe
+    # 1. Loop through every ingredient in the recipe 
     for item in product.recipe_items:
-        qty_needed = item.quantity_required
+        # --- BULK CALCULATION ---
+        # Multiply the single recipe requirement by the number of items actually baked
+        total_qty_needed = item.quantity_required * quantity_sold
         
         # --- NEWEST PURCHASE PRICE CALCULATION ---
+        # We look up the most recent lot to see what it would cost to replace these ingredients today
         newest_lot = db.query(models.IngredientLot)\
             .filter(models.IngredientLot.ingredient_id == item.ingredient_id)\
             .order_by(desc(models.IngredientLot.purchase_date)).first()
         
         if newest_lot:
             cost_per_unit_newest = newest_lot.cost_total / newest_lot.quantity_purchased
-            total_cost_newest += (cost_per_unit_newest * qty_needed)
+            total_cost_newest += (cost_per_unit_newest * total_qty_needed)
 
-        # --- FIFO DEDUCTION & OLDEST PRICE CALCULATION ---
-        remaining_to_deduct = qty_needed
+        # --- FIFO DEDUCTION & OLDEST PRICE CALCULATION --- 
+        # We deduct from the oldest available lots first until the requirement is met
+        remaining_to_deduct = total_qty_needed
         
         while remaining_to_deduct > 0:
-            # Find the oldest lot that isn't empty
+            print(f"DEBUG: Ingredient ID {item.ingredient_id} - Need: {remaining_to_deduct}")
+            
             oldest_lot = db.query(models.IngredientLot)\
                 .filter(models.IngredientLot.ingredient_id == item.ingredient_id, 
                         models.IngredientLot.is_depleted == False)\
                 .order_by(models.IngredientLot.purchase_date).first()
             
             if not oldest_lot:
+                print("DEBUG: Out of stock, breaking loop")
                 raise Exception(f"Out of stock: {item.ingredient.name}")
 
             cost_per_unit_fifo = oldest_lot.cost_total / oldest_lot.quantity_purchased
             
             if oldest_lot.quantity_remaining >= remaining_to_deduct:
-                # This lot has enough to cover the rest of the recipe
-                total_cost_fifo += (cost_per_unit_fifo * remaining_to_deduct)
                 oldest_lot.quantity_remaining -= remaining_to_deduct
-                remaining_to_deduct = 0
+                total_cost_fifo += (cost_per_unit_fifo * remaining_to_deduct)
+                remaining_to_deduct = 0 
             else:
-                # Use what's left in this lot and move to the next
                 total_cost_fifo += (cost_per_unit_fifo * oldest_lot.quantity_remaining)
                 remaining_to_deduct -= oldest_lot.quantity_remaining
                 oldest_lot.quantity_remaining = 0
                 oldest_lot.is_depleted = True
-    
-    # 2. Record the transaction with the margins
-    margin_fifo = product.retail_price - total_cost_fifo
-    margin_newest = product.retail_price - total_cost_newest
+            
+            # FOR TESTING: This prevents the 'hang'
+            db.flush()
+        
+    # 2. Record the transaction with the margins 
+    # Note: retail_price is multiplied by quantity_sold for accurate totals
+    total_revenue = product.retail_price * quantity_sold
+    margin_fifo = total_revenue - total_cost_fifo
+    margin_newest = total_revenue - total_cost_newest
     
     new_log = models.TransactionLog(
         tenant_id=tenant_id,
         product_id=product_id,
-        sale_price=product.retail_price,
+        sale_price=total_revenue, # Total for the whole batch
         margin_fifo=margin_fifo,
         margin_newest=margin_newest
     )
@@ -665,7 +769,6 @@ def process_bake_and_calculate_margins(db: Session, product_id: int, tenant_id: 
     db.add(new_log)
     db.commit()
     return new_log
-    
 
 ##############################
 
@@ -726,12 +829,14 @@ class SaleCreate(BaseModel):
 class SaleResponse(BaseModel):
     id: int
     tenant_id: int
-    total_amount: float
-    created_at: datetime
+    sale_price: float  # Changed from total_amount to sale_price
+    margin_fifo: float # Add these to see your margins in the response
+    margin_newest: float
+    timestamp: datetime # Changed from created_at to timestamp to match models.py
 
     class Config:
-        from_attributes = True  # This allows Pydantic to read data from SQLAlchemy models
-
+        from_attributes = True
+        
 class TenantBase(BaseModel):
     name: str  # We'll map this to business_name
     email: EmailStr
@@ -779,6 +884,152 @@ class UserResponse(BaseModel):
     class Config:
         from_attributes = True
 
+class CustomOrderItemCreate(BaseModel):
+    product_id: int
+    quantity: int
+    price_override: Optional[float] = None
+
+class CustomOrderItemResponse(BaseModel):
+    id: int
+    product_id: int
+    quantity: int
+    price_override: Optional[float]
+    
+    class Config:
+        from_attributes = True
+
+class CustomOrderCreate(BaseModel):
+    customer_name: str
+    customer_email: Optional[str] = None
+    description: str
+    delivery_date: datetime
+    items: List[CustomOrderItemCreate] = []
+
+class CustomOrderUpdate(BaseModel):
+    total_price: Optional[float] = None
+    deposit_amount: Optional[float] = None
+    status: Optional[str] = None
+
+class CustomOrderResponse(BaseModel):
+    id: int
+    tenant_id: int
+    customer_name: str
+    customer_email: Optional[str]
+    description: str
+    total_price: Optional[float]
+    deposit_amount: float
+    status: str
+    delivery_date: datetime
+    created_at: datetime
+    items: List[CustomOrderItemResponse] = []
+
+    class Config:
+        from_attributes = True
+
+class RecipeItemResponse(BaseModel):
+    id: int
+    ingredient_id: int
+    quantity_required: float
+
+    class Config:
+        from_attributes = True
+
+class ProductResponse(BaseModel):
+    id: int
+    tenant_id: int
+    name: str
+    retail_price: float
+    # Maps directly to the 'recipe_items' relationship in models.py
+    recipe_items: List[RecipeItemResponse] = [] 
+
+    class Config:
+        from_attributes = True
+
+class IngredientStockResponse(BaseModel):
+    ingredient_id: int
+    name: str
+    total_quantity: float
+    base_unit: str
+
+    class Config:
+        from_attributes = True
+
+##############################
+
+
+FILE: routers/orders.py
+-----------------------
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from typing import List
+import database, models, schemas
+from auth import get_current_user, get_tenant_db
+
+router = APIRouter(prefix="/orders", tags=["Custom Orders"])
+
+@router.post("/request-quote", response_model=schemas.CustomOrderResponse)
+def create_custom_order(
+    order: schemas.CustomOrderCreate, 
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_tenant_db)
+):
+    # 1. Create the parent order record
+    new_order = models.CustomOrder(
+        tenant_id=current_user.tenant_id,
+        customer_name=order.customer_name,
+        customer_email=order.customer_email,
+        description=order.description,
+        delivery_date=order.delivery_date
+    )
+    db.add(new_order)
+    db.flush() # Flushes to DB to get the new_order.id without committing yet
+
+    # 2. Add all associated products to the order
+    for item in order.items:
+        new_item = models.CustomOrderItem(
+            custom_order_id=new_order.id,
+            product_id=item.product_id,
+            quantity=item.quantity,
+            price_override=item.price_override
+        )
+        db.add(new_item)
+
+    # 3. Commit the entire transaction safely
+    db.commit()
+    db.refresh(new_order)
+    return new_order
+
+@router.put("/{order_id}/update-pipeline", response_model=schemas.CustomOrderResponse)
+def update_order_pipeline(
+    order_id: int, 
+    update_data: schemas.CustomOrderUpdate,
+    db: Session = Depends(get_tenant_db)
+):
+    # RLS ensures they can only update their own bakery's orders
+    order = db.query(models.CustomOrder).filter(models.CustomOrder.id == order_id).first()
+    
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+        
+    if update_data.total_price is not None:
+        order.total_price = update_data.total_price
+    if update_data.deposit_amount is not None:
+        order.deposit_amount = update_data.deposit_amount
+    if update_data.status is not None:
+        order.status = update_data.status
+        
+    db.commit()
+    db.refresh(order)
+    return order
+
+@router.get("/pipeline", response_model=List[schemas.CustomOrderResponse])
+def get_active_orders(db: Session = Depends(get_tenant_db)):
+    # Returns all orders not yet completed or cancelled
+    orders = db.query(models.CustomOrder).filter(
+        models.CustomOrder.status.notin_([models.OrderStatus.COMPLETED, models.OrderStatus.CANCELLED])
+    ).order_by(models.CustomOrder.delivery_date).all()
+    return orders
+
 ##############################
 
 
@@ -793,21 +1044,26 @@ FILE: routers/recipes.py
 ------------------------
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from typing import List
 import database, models, schemas
+from auth import get_current_user, get_tenant_db
 
 router = APIRouter(prefix="/products", tags=["Products & Recipes"])
 
-@router.post("/", response_model=schemas.ProductCreate)
-def create_product_with_recipe(product_in: schemas.ProductCreate, tenant_id: int, db: Session = Depends(database.get_db)):
-    # 1. Create the Product master record
+@router.post("/", response_model=schemas.ProductResponse)
+def create_product_with_recipe(
+    product_in: schemas.ProductCreate, 
+    current_user: models.User = Depends(get_current_user), # Secure identity
+    db: Session = Depends(get_tenant_db)                   # Secure RLS database
+):
+    # 1. Create the Product master record securely
     new_product = models.Product(
-        tenant_id=tenant_id,
+        tenant_id=current_user.tenant_id, # Safely applied from the token
         name=product_in.name,
         retail_price=product_in.retail_price
     )
     db.add(new_product)
-    db.commit()
-    db.refresh(new_product)
+    db.flush() # Get the new product ID before committing
 
     # 2. Add each Ingredient to the Recipe
     for item in product_in.recipe:
@@ -819,7 +1075,18 @@ def create_product_with_recipe(product_in: schemas.ProductCreate, tenant_id: int
         db.add(recipe_entry)
     
     db.commit()
+    db.refresh(new_product)
     return new_product
+
+
+@router.get("/list", response_model=List[schemas.ProductResponse])
+def list_products_and_recipes(db: Session = Depends(get_tenant_db)):
+    """
+    Returns all baked goods and their associated recipes.
+    RLS ensures only this bakery's products are returned.
+    """
+    products = db.query(models.Product).all()
+    return products
 
 ##############################
 
@@ -883,16 +1150,28 @@ FILE: routers/sales.py
 ----------------------
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-import database, crud, schemas, models
-from auth import get_current_user, check_admin_or_owner
+import database, crud, schemas, models, utils
+from auth import get_current_user, get_tenant_db, check_admin_or_owner
 
 router = APIRouter(prefix="/sales", tags=["Sales"])
 
 @router.post("/record-sale", response_model=schemas.SaleResponse)
-def record_sale(sale: schemas.SaleCreate, db: Session = Depends(database.get_db)):
+def record_sale(
+    sale: schemas.SaleCreate, 
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_tenant_db) 
+):
     try:
-        return crud.process_bake_and_calculate_margins(db, sale.product_id, sale.tenant_id)
+        # This returns a TransactionLog object
+        result = crud.process_bake_and_calculate_margins(
+            db, 
+            product_id=sale.item_id, 
+            tenant_id=current_user.tenant_id,
+            quantity_sold=sale.quantity 
+        )
+        return result
     except Exception as e:
+        # If this is hit, you will see a 400 error in your logs
         raise HTTPException(status_code=400, detail=str(e))
     
 @router.get("/margins/{product_id}")
@@ -924,9 +1203,9 @@ def get_product_margins(
 
 FILE: routers/admin.py
 ----------------------
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-import models, database
+import models, database, auth
 
 router = APIRouter(prefix="/admin", tags=["Super Admin"])
 
@@ -939,9 +1218,66 @@ def create_new_bakery(name: str, domain: str, db: Session = Depends(database.get
 
 @router.get("/global-stats")
 def get_platform_metrics(db: Session = Depends(database.get_db)):
-    # Total revenue processed across all bakeries (for your marketing)
     total_sales = db.query(models.TransactionLog).count()
     return {"total_transactions_managed": total_sales}
+
+@router.get("/list-tenants")
+def get_all_tenants(db: Session = Depends(database.get_db)):
+    tenants = db.query(models.Tenant).order_by(models.Tenant.created_at.desc()).all()
+    return tenants
+
+@router.get("/list-users")
+def get_all_users(db: Session = Depends(database.get_db)):
+    users = db.query(models.User).all()
+    result = []
+    for u in users:
+        result.append({
+            "id": u.id,
+            "username": u.username,
+            "role": u.role,
+            "tenant_id": u.tenant_id,
+            "business_name": u.tenant.business_name if u.tenant else "Orphaned"
+        })
+    return result
+
+@router.delete("/delete-user/{user_id}")
+def delete_user(user_id: int, db: Session = Depends(database.get_db)):
+    user = db.query(models.User).filter(models.User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    db.delete(user)
+    db.commit()
+    return {"message": "User deleted successfully"}
+
+@router.get("/recent-activity")
+def get_recent_activity(db: Session = Depends(database.get_db)):
+    # Grab the 15 most recent sales across the entire SaaS platform
+    logs = db.query(models.TransactionLog).order_by(models.TransactionLog.timestamp.desc()).limit(15).all()
+    
+    activity = []
+    for log in logs:
+        tenant = db.query(models.Tenant).filter(models.Tenant.id == log.tenant_id).first()
+        product = db.query(models.Product).filter(models.Product.id == log.product_id).first()
+        
+        activity.append({
+            "id": log.id,
+            "tenant_name": tenant.business_name if tenant else f"Tenant #{log.tenant_id}",
+            "product_name": product.name if product else f"Product #{log.product_id}",
+            "amount": log.sale_price,
+            "time": log.timestamp
+        })
+    return activity
+
+@router.post("/impersonate/{user_id}")
+def impersonate_user(user_id: int, db: Session = Depends(database.get_db)):
+    # Find the user
+    user = db.query(models.User).filter(models.User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Generate a valid JWT token just like the normal login route does [cite: 89, 90]
+    access_token = auth.create_access_token(data={"sub": user.username})
+    return {"access_token": access_token, "token_type": "bearer"}
 
 ##############################
 
@@ -1133,5 +1469,929 @@ def list_ingredients(
     ingredients = db.query(models.Ingredient).all()
     
     return ingredients
+
+@router.get("/stock-levels", response_model=List[schemas.IngredientStockResponse])
+def get_stock_levels(db: Session = Depends(get_tenant_db)):
+    """
+    Calculates the total quantity on hand for every ingredient 
+    by summing up all non-depleted lots.
+    """
+    # We join Ingredients and IngredientLots to get names and quantities together
+    stock = db.query(
+        models.Ingredient.id.label("ingredient_id"),
+        models.Ingredient.name,
+        func.sum(models.IngredientLot.quantity_remaining).label("total_quantity"),
+        models.Ingredient.base_unit
+    ).join(models.IngredientLot).filter(
+        models.IngredientLot.is_depleted == False
+    ).group_by(models.Ingredient.id).all()
+    
+    return stock
+
+##############################
+
+
+FILE: frontend/index.html
+-------------------------
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BakeryOS - Tenant Panel</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-50 text-gray-800 font-sans h-screen flex">
+
+    <div id="login-view" class="flex flex-col items-center justify-center w-full h-full">
+        <div class="bg-white p-8 rounded-lg shadow-md w-96">
+            <h1 class="text-3xl font-bold mb-6 text-center text-indigo-600">BakeryOS</h1>
+            <form id="login-form" class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium">Username</label>
+                    <input type="text" id="username" class="w-full mt-1 p-2 border rounded" required>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium">Password</label>
+                    <input type="password" id="password" class="w-full mt-1 p-2 border rounded" required>
+                </div>
+                <button type="submit" class="w-full bg-indigo-600 text-white p-2 rounded hover:bg-indigo-700 font-bold">Sign In</button>
+                <p id="login-error" class="text-red-500 text-sm hidden"></p>
+            </form>
+        </div>
+    </div>
+
+    <div id="dashboard-view" class="hidden w-full h-full flex">
+        
+        <aside class="w-64 bg-indigo-900 text-white flex flex-col shrink-0">
+            <div class="p-6 border-b border-indigo-800">
+                <h2 id="bakery-name-display" class="text-xl font-bold break-words">BakeryOS</h2>
+                <p id="user-role-display" class="text-xs text-indigo-300 mt-1"></p>
+            </div>
+            <nav class="flex-1 p-4 space-y-2">
+                <button onclick="showSection('inventory')" class="w-full text-left p-2 hover:bg-indigo-800 rounded">📦 Inventory</button>
+                <button onclick="showSection('products')" class="w-full text-left p-2 hover:bg-indigo-800 rounded">🥐 Products & POS</button>
+                <button onclick="showSection('orders')" class="w-full text-left p-2 hover:bg-indigo-800 rounded">📋 Custom Orders</button>
+            </nav>
+            <button onclick="logout()" class="p-4 bg-indigo-950 hover:bg-red-600 text-left font-bold">🚪 Logout</button>
+        </aside>
+
+        <main class="flex-1 p-8 overflow-y-auto">
+            
+            <section id="section-inventory" class="hidden space-y-6">
+                <h2 class="text-3xl font-bold">Inventory Management</h2>
+                
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div class="bg-white border rounded shadow p-4">
+                        <h3 class="font-bold text-lg mb-4">1. Add Master Ingredient</h3>
+                        <form id="add-ingredient-form" class="space-y-3">
+                            <div>
+                                <label class="block text-sm font-medium">Ingredient Name</label>
+                                <input type="text" id="new-ing-name" class="w-full p-2 border rounded" required placeholder="e.g. Bread Flour">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium">Base Unit</label>
+                                <input type="text" id="new-ing-unit" class="w-full p-2 border rounded" required placeholder="e.g. grams">
+                            </div>
+                            <button type="submit" class="bg-indigo-600 text-white px-4 py-2 rounded hover:bg-indigo-700 w-full">Save Ingredient</button>
+                        </form>
+                    </div>
+
+                    <div class="bg-indigo-50 border border-indigo-100 rounded shadow p-4">
+                        <h3 class="font-bold text-lg mb-4">2. Receive Stock (Lot)</h3>
+                        <form id="receive-stock-form" class="space-y-3">
+                            <div class="grid grid-cols-2 gap-2">
+                                <div>
+                                    <label class="block text-sm font-medium">Ingredient ID</label>
+                                    <input type="number" id="recv-id" class="w-full p-2 border rounded" required>
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium">Unit (e.g. lbs)</label>
+                                    <input type="text" id="recv-unit" class="w-full p-2 border rounded" required>
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium">Quantity</label>
+                                    <input type="number" step="0.01" id="recv-qty" class="w-full p-2 border rounded" required>
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium">Total Cost ($)</label>
+                                    <input type="number" step="0.01" id="recv-cost" class="w-full p-2 border rounded" required>
+                                </div>
+                            </div>
+                            <button type="submit" class="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700 w-full">Receive Inventory</button>
+                        </form>
+                    </div>
+                </div>
+
+                <div class="bg-white rounded shadow p-4">
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="font-bold text-lg">Current Stock Levels</h3>
+                        <button onclick="fetchStockLevels()" class="bg-blue-500 text-white px-3 py-1 rounded text-sm">Refresh</button>
+                    </div>
+                    <table class="w-full text-left border-collapse">
+                    <thead>
+                        <tr class="bg-gray-100 text-sm">
+                            <th class="p-2 border-b">ID</th>
+                            <th class="p-2 border-b">Ingredient Name</th>
+                            <th class="p-2 border-b">Qty on Hand</th>
+                            <th class="p-2 border-b">Base Unit</th>
+                            <th class="p-2 border-b text-right">Actions</th> </tr>
+                    </thead>
+                    <tbody id="inventory-table-body" class="text-sm"></tbody>
+                </table>
+                </div>
+            </section>
+
+            <section id="section-products" class="hidden space-y-6">
+                <h2 class="text-3xl font-bold">Products & Point of Sale</h2>
+                
+                <div class="bg-white border rounded shadow p-4">
+                    <h3 class="font-bold text-lg mb-4">Create New Product & Recipe</h3>
+                    <form id="add-product-form" class="space-y-4">
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-sm font-medium">Product Name</label>
+                                <input type="text" id="prod-name" class="w-full p-2 border rounded" required>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium">Retail Price ($)</label>
+                                <input type="number" step="0.01" id="prod-price" class="w-full p-2 border rounded" required>
+                            </div>
+                        </div>
+                        
+                        <div class="bg-gray-50 p-3 rounded border">
+                            <div class="flex justify-between items-center mb-2">
+                                <label class="block text-sm font-medium">Bill of Materials (Recipe)</label>
+                                <button type="button" onclick="addRecipeRow()" class="text-sm bg-gray-200 px-2 py-1 rounded">+ Add Ingredient</button>
+                            </div>
+                            <div id="recipe-rows" class="space-y-2">
+                                </div>
+                        </div>
+                        <button type="submit" class="bg-indigo-600 text-white px-4 py-2 rounded hover:bg-indigo-700 w-full font-bold">Save Product</button>
+                    </form>
+                </div>
+
+                <div>
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="font-bold text-xl">Point of Sale Catalog</h3>
+                        <button onclick="fetchProducts()" class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600">Refresh POS</button>
+                    </div>
+                    <div id="sale-alert" class="hidden mb-4 p-4 rounded text-white font-bold text-center"></div>
+                    <div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-6" id="products-grid"></div>
+                </div>
+            </section>
+
+            <section id="section-orders" class="hidden space-y-6">
+                <h2 class="text-3xl font-bold">Custom Orders</h2>
+
+                <div class="bg-white border rounded shadow p-4">
+                    <h3 class="font-bold text-lg mb-4">Draft New Order Quote</h3>
+                    <form id="add-order-form" class="space-y-4">
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-sm font-medium">Customer Name</label>
+                                <input type="text" id="order-customer" class="w-full p-2 border rounded" required>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium">Delivery Date & Time</label>
+                                <input type="datetime-local" id="order-date" class="w-full p-2 border rounded" required>
+                            </div>
+                            <div class="col-span-2">
+                                <label class="block text-sm font-medium">Order Description</label>
+                                <input type="text" id="order-desc" class="w-full p-2 border rounded" placeholder="e.g. 3-Tier Wedding Cake" required>
+                            </div>
+                        </div>
+
+                        <div class="bg-gray-50 p-3 rounded border">
+                            <div class="flex justify-between items-center mb-2">
+                                <label class="block text-sm font-medium">Order Items</label>
+                                <button type="button" onclick="addOrderItemRow()" class="text-sm bg-gray-200 px-2 py-1 rounded">+ Add Item</button>
+                            </div>
+                            <div id="order-item-rows" class="space-y-2">
+                                </div>
+                        </div>
+                        <button type="submit" class="bg-indigo-600 text-white px-4 py-2 rounded hover:bg-indigo-700 w-full font-bold">Request Quote</button>
+                    </form>
+                </div>
+
+                <div class="bg-white rounded shadow p-4">
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="font-bold text-xl">Active Pipeline</h3>
+                        <button onclick="fetchOrders()" class="bg-blue-500 text-white px-4 py-2 rounded">Refresh Pipeline</button>
+                    </div>
+                    <table class="w-full text-left border-collapse">
+                        <thead>
+                            <tr class="bg-gray-100 text-sm">
+                                <th class="p-2 border-b">Order #</th>
+                                <th class="p-2 border-b">Customer</th>
+                                <th class="p-2 border-b">Delivery Date</th>
+                                <th class="p-2 border-b">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="orders-table-body" class="text-sm"></tbody>
+                    </table>
+                </div>
+            </section>
+
+        </main>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
+
+##############################
+
+
+FILE: frontend/app.js
+---------------------
+// app.js
+const API_URL = 'http://localhost:8100';
+
+// --- INIT & AUTH ---
+document.addEventListener('DOMContentLoaded', () => {
+    const token = localStorage.getItem('bakery_token');
+    if (token) showDashboard();
+    
+    // Add initial blank rows to dynamic forms
+    addRecipeRow();
+    addOrderItemRow();
+});
+
+document.getElementById('login-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const formData = new URLSearchParams();
+    formData.append('username', document.getElementById('username').value);
+    formData.append('password', document.getElementById('password').value);
+
+    try {
+        const response = await fetch(`${API_URL}/login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: formData
+        });
+
+        if (!response.ok) throw new Error("Invalid credentials");
+        const data = await response.json();
+        localStorage.setItem('bakery_token', data.access_token);
+        
+        document.getElementById('login-error').classList.add('hidden');
+        showDashboard();
+    } catch (err) {
+        const errorEl = document.getElementById('login-error');
+        errorEl.textContent = err.message;
+        errorEl.classList.remove('hidden');
+    }
+});
+
+function logout() {
+    localStorage.removeItem('bakery_token');
+    document.getElementById('dashboard-view').classList.add('hidden');
+    document.getElementById('login-view').classList.remove('hidden');
+    document.getElementById('login-view').classList.add('flex');
+}
+
+function getHeaders() {
+    return {
+        'Authorization': `Bearer ${localStorage.getItem('bakery_token')}`,
+        'Content-Type': 'application/json'
+    };
+}
+
+// --- NAVIGATION ---
+function showDashboard() {
+    document.getElementById('login-view').classList.add('hidden');
+    document.getElementById('login-view').classList.remove('flex');
+    document.getElementById('dashboard-view').classList.remove('hidden');
+    
+    fetchUserInfo(); // <--- ADD THIS LINE HERE
+    
+    showSection('inventory'); 
+}
+
+function showSection(sectionId) {
+    document.querySelectorAll('main section').forEach(sec => sec.classList.add('hidden'));
+    document.getElementById(`section-${sectionId}`).classList.remove('hidden');
+    if (sectionId === 'inventory') fetchStockLevels();
+    if (sectionId === 'products') fetchProducts();
+    if (sectionId === 'orders') fetchOrders();
+}
+
+async function fetchUserInfo() {
+    try {
+        const res = await fetch(`${API_URL}/users/me`, { headers: getHeaders() });
+        if (!res.ok) return; // Fail silently if something goes wrong
+        
+        const data = await res.json();
+        
+        // Inject the bakery name and user info into the sidebar
+        document.getElementById('bakery-name-display').textContent = data.business_name;
+        document.getElementById('user-role-display').textContent = `User: ${data.username} (${data.role})`;
+    } catch (err) {
+        console.error("Failed to fetch user info:", err);
+    }
+}
+
+// ==========================================
+// 1. INVENTORY SYSTEM
+// ==========================================
+
+// Add Master Ingredient
+document.getElementById('add-ingredient-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const name = document.getElementById('new-ing-name').value;
+    const base_unit = document.getElementById('new-ing-unit').value;
+
+    try {
+        const res = await fetch(`${API_URL}/inventory/add-ingredient`, {
+            method: 'POST',
+            headers: getHeaders(),
+            body: JSON.stringify({ name, base_unit, is_non_food: false })
+        });
+        if (!res.ok) throw await res.json();
+        alert("Ingredient added!");
+        e.target.reset();
+        fetchStockLevels();
+    } catch (err) {
+        alert(err.detail || "Failed to add ingredient");
+    }
+});
+
+// Receive Stock Lot
+document.getElementById('receive-stock-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const id = document.getElementById('recv-id').value;
+    const qty = document.getElementById('recv-qty').value;
+    const unit = document.getElementById('recv-unit').value;
+    const cost = document.getElementById('recv-cost').value;
+
+    try {
+        const res = await fetch(`${API_URL}/inventory/receive-lot?ingredient_id=${id}&qty=${qty}&unit=${unit}&cost=${cost}`, {
+            method: 'POST',
+            headers: getHeaders()
+        });
+        if (!res.ok) throw await res.json();
+        alert("Stock received!");
+        e.target.reset();
+        fetchStockLevels();
+    } catch (err) {
+        alert(err.detail || "Failed to receive stock");
+    }
+});
+
+async function fetchStockLevels() {
+    try {
+        const res = await fetch(`${API_URL}/inventory/stock-levels`, { headers: getHeaders() });
+        if (res.status === 401) return logout(); 
+        const stock = await res.json();
+        
+        const tbody = document.getElementById('inventory-table-body');
+        tbody.innerHTML = stock.map(item => `
+            <tr>
+                <td class="p-2 border-b text-gray-500">#${item.ingredient_id}</td>
+                <td class="p-2 border-b font-medium">${item.name}</td>
+                <td class="p-2 border-b">${item.total_quantity.toFixed(2)}</td>
+                <td class="p-2 border-b text-gray-500">${item.base_unit}</td>
+                <td class="p-2 border-b text-right space-x-2">
+                    <button onclick="editIngredient(${item.ingredient_id}, '${item.name}', '${item.base_unit}')" class="text-blue-500 hover:text-blue-700 font-bold">Edit</button>
+                    <button onclick="deleteIngredient(${item.ingredient_id})" class="text-red-500 hover:text-red-700 font-bold">Delete</button>
+                </td>
+            </tr>
+        `).join('');
+    } catch (err) { console.error(err); }
+}
+
+async function editIngredient(id, currentName, currentUnit) {
+    // Prompt the user for the new details (pre-filled with current ones)
+    const newName = prompt("Update Ingredient Name:", currentName);
+    if (!newName) return; // User cancelled
+    
+    const newUnit = prompt("Update Base Unit (e.g. grams, ml):", currentUnit);
+    if (!newUnit) return; // User cancelled
+
+    try {
+        const res = await fetch(`${API_URL}/inventory/edit-ingredient/${id}`, {
+            method: 'PUT',
+            headers: getHeaders(),
+            body: JSON.stringify({ name: newName, base_unit: newUnit, is_non_food: false })
+        });
+        
+        if (!res.ok) throw await res.json();
+        
+        alert("Ingredient updated successfully!");
+        fetchStockLevels(); // Refresh the table
+    } catch (err) {
+        alert(err.detail || "Failed to update ingredient");
+    }
+}
+
+async function deleteIngredient(id) {
+    // Confirm before deleting
+    if (!confirm("Are you sure you want to delete this ingredient? This will fail if it is used in active recipes or stock lots.")) return;
+
+    try {
+        const res = await fetch(`${API_URL}/inventory/remove-ingredient/${id}`, {
+            method: 'DELETE',
+            headers: getHeaders()
+        });
+        
+        if (!res.ok) throw await res.json();
+        
+        alert("Ingredient deleted successfully!");
+        fetchStockLevels(); // Refresh the table
+    } catch (err) {
+        alert(err.detail || "Failed to delete ingredient");
+    }
+}
+async function editIngredient(id, currentName, currentUnit) {
+    // Prompt the user for the new details (pre-filled with current ones)
+    const newName = prompt("Update Ingredient Name:", currentName);
+    if (!newName) return; // User cancelled
+    
+    const newUnit = prompt("Update Base Unit (e.g. grams, ml):", currentUnit);
+    if (!newUnit) return; // User cancelled
+
+    try {
+        const res = await fetch(`${API_URL}/inventory/edit-ingredient/${id}`, {
+            method: 'PUT',
+            headers: getHeaders(),
+            body: JSON.stringify({ name: newName, base_unit: newUnit, is_non_food: false })
+        });
+        
+        if (!res.ok) throw await res.json();
+        
+        alert("Ingredient updated successfully!");
+        fetchStockLevels(); // Refresh the table
+    } catch (err) {
+        alert(err.detail || "Failed to update ingredient");
+    }
+}
+
+async function deleteIngredient(id) {
+    // Confirm before deleting
+    if (!confirm("Are you sure you want to delete this ingredient? This will fail if it is used in active recipes or stock lots.")) return;
+
+    try {
+        const res = await fetch(`${API_URL}/inventory/remove-ingredient/${id}`, {
+            method: 'DELETE',
+            headers: getHeaders()
+        });
+        
+        if (!res.ok) throw await res.json();
+        
+        alert("Ingredient deleted successfully!");
+        fetchStockLevels(); // Refresh the table
+    } catch (err) {
+        alert(err.detail || "Failed to delete ingredient");
+    }
+}
+
+// ==========================================
+// 2. PRODUCTS & RECIPES
+// ==========================================
+
+function addRecipeRow() {
+    const container = document.getElementById('recipe-rows');
+    const row = document.createElement('div');
+    row.className = 'flex space-x-2 recipe-row';
+    row.innerHTML = `
+        <input type="number" placeholder="Ing. ID" class="w-1/2 p-1 border rounded text-sm ing-id" required>
+        <input type="number" step="0.01" placeholder="Qty Needed" class="w-1/2 p-1 border rounded text-sm ing-qty" required>
+        <button type="button" onclick="this.parentElement.remove()" class="text-red-500 font-bold px-2">X</button>
+    `;
+    container.appendChild(row);
+}
+
+document.getElementById('add-product-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const name = document.getElementById('prod-name').value;
+    const price = document.getElementById('prod-price').value;
+    
+    // Parse dynamic rows
+    const recipe = [];
+    document.querySelectorAll('.recipe-row').forEach(row => {
+        const ingId = row.querySelector('.ing-id').value;
+        const qty = row.querySelector('.ing-qty').value;
+        if(ingId && qty) {
+            recipe.push({ ingredient_id: parseInt(ingId), quantity_required: parseFloat(qty) });
+        }
+    });
+
+    try {
+        const res = await fetch(`${API_URL}/products/`, {
+            method: 'POST',
+            headers: getHeaders(),
+            body: JSON.stringify({ name, retail_price: parseFloat(price), recipe })
+        });
+        if (!res.ok) throw await res.json();
+        alert("Product and Recipe saved!");
+        e.target.reset();
+        document.getElementById('recipe-rows').innerHTML = '';
+        addRecipeRow();
+        fetchProducts();
+    } catch (err) {
+        alert(err.detail || "Failed to save product");
+    }
+});
+
+async function fetchProducts() {
+    try {
+        const res = await fetch(`${API_URL}/products/list`, { headers: getHeaders() });
+        if (res.status === 401) return logout();
+        const products = await res.json();
+        
+        const grid = document.getElementById('products-grid');
+        grid.innerHTML = products.map(p => `
+            <div class="bg-white p-4 rounded shadow border border-gray-100 flex flex-col justify-between">
+                <div>
+                    <span class="text-xs text-gray-400">ID: #${p.id}</span>
+                    <h3 class="font-bold text-lg text-indigo-700">${p.name}</h3>
+                    <p class="text-2xl mt-2 mb-4 font-light">$${p.retail_price.toFixed(2)}</p>
+                </div>
+                <button onclick="recordSale(${p.id}, ${p.retail_price})" class="w-full bg-green-500 text-white p-2 rounded hover:bg-green-600 transition font-bold">
+                    Sell 1 Item
+                </button>
+            </div>
+        `).join('');
+    } catch (err) { console.error(err); }
+}
+
+async function recordSale(productId, price) {
+    const alertBox = document.getElementById('sale-alert');
+    try {
+        const res = await fetch(`${API_URL}/sales/record-sale`, {
+            method: 'POST',
+            headers: getHeaders(),
+            body: JSON.stringify({ item_id: productId, quantity: 1, price: price })
+        });
+        const data = await res.json();
+        if (!res.ok) throw data;
+
+        alertBox.className = 'mb-4 p-4 rounded text-white font-bold bg-green-500 block';
+        alertBox.innerHTML = `Sale Recorded! Rev: $${data.sale_price.toFixed(2)} | FIFO Margin: $${data.margin_fifo.toFixed(2)}`;
+    } catch (err) {
+        alertBox.className = 'mb-4 p-4 rounded text-white font-bold bg-red-500 block';
+        alertBox.textContent = `Sale Failed: ${err.detail || "Error"}`;
+    }
+}
+
+// ==========================================
+// 3. CUSTOM ORDERS
+// ==========================================
+
+function addOrderItemRow() {
+    const container = document.getElementById('order-item-rows');
+    const row = document.createElement('div');
+    row.className = 'flex space-x-2 order-row';
+    row.innerHTML = `
+        <input type="number" placeholder="Prod. ID" class="w-1/2 p-1 border rounded text-sm ord-id" required>
+        <input type="number" placeholder="Qty" class="w-1/4 p-1 border rounded text-sm ord-qty" required>
+        <button type="button" onclick="this.parentElement.remove()" class="text-red-500 font-bold px-2">X</button>
+    `;
+    container.appendChild(row);
+}
+
+document.getElementById('add-order-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    
+    // Convert local datetime to ISO standard for FastAPI
+    const rawDate = document.getElementById('order-date').value;
+    const isoDate = new Date(rawDate).toISOString();
+
+    const payload = {
+        customer_name: document.getElementById('order-customer').value,
+        description: document.getElementById('order-desc').value,
+        delivery_date: isoDate,
+        items: []
+    };
+
+    document.querySelectorAll('.order-row').forEach(row => {
+        const pId = row.querySelector('.ord-id').value;
+        const qty = row.querySelector('.ord-qty').value;
+        if(pId && qty) {
+            payload.items.push({ product_id: parseInt(pId), quantity: parseInt(qty) });
+        }
+    });
+
+    try {
+        const res = await fetch(`${API_URL}/orders/request-quote`, {
+            method: 'POST',
+            headers: getHeaders(),
+            body: JSON.stringify(payload)
+        });
+        if (!res.ok) throw await res.json();
+        alert("Order Quote Drafted!");
+        e.target.reset();
+        document.getElementById('order-item-rows').innerHTML = '';
+        addOrderItemRow();
+        fetchOrders();
+    } catch (err) {
+        alert(err.detail || "Failed to create order");
+    }
+});
+
+async function fetchOrders() {
+    try {
+        const res = await fetch(`${API_URL}/orders/pipeline`, { headers: getHeaders() });
+        if (res.status === 401) return logout();
+        const orders = await res.json();
+        
+        const tbody = document.getElementById('orders-table-body');
+        tbody.innerHTML = orders.map(order => `
+            <tr>
+                <td class="p-2 border-b font-medium">#${order.id}</td>
+                <td class="p-2 border-b">${order.customer_name}</td>
+                <td class="p-2 border-b">${new Date(order.delivery_date).toLocaleDateString()}</td>
+                <td class="p-2 border-b">
+                    <span class="px-2 py-1 bg-yellow-100 text-yellow-800 text-xs rounded-full font-bold">
+                        ${order.status}
+                    </span>
+                </td>
+            </tr>
+        `).join('');
+    } catch (err) { console.error(err); }
+}
+
+##############################
+
+
+FILE: frontend/admin.html
+-------------------------
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BakeryOS - Super Admin</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-900 text-slate-200 font-sans h-screen flex flex-col">
+
+    <header class="bg-slate-950 p-4 border-b border-slate-800 flex justify-between items-center shadow-md shrink-0">
+        <h1 class="text-2xl font-bold text-indigo-400">BakeryOS <span class="text-white">Super Admin</span></h1>
+        <div class="space-x-4 flex items-center">
+            <button onclick="refreshAll()" class="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded transition font-bold text-sm">
+                ↻ Refresh Dashboard
+            </button>
+            <div class="text-sm font-medium bg-slate-800 px-3 py-1 rounded text-slate-300">Internal Use Only</div>
+        </div>
+    </header>
+
+    <main class="flex-1 p-8 overflow-y-auto max-w-7xl w-full mx-auto space-y-8">
+        
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div class="bg-slate-800 p-6 rounded-lg border border-slate-700 shadow flex flex-col justify-center relative overflow-hidden">
+                <div class="absolute -right-4 -top-4 text-slate-700 opacity-50 text-8xl">📊</div>
+                <p class="text-slate-400 font-medium relative z-10">Total Platform Transactions</p>
+                <p id="global-stats-display" class="text-4xl font-bold text-white mt-1 relative z-10">...</p>
+            </div>
+            <div class="bg-slate-800 p-6 rounded-lg border border-slate-700 shadow flex flex-col justify-center relative overflow-hidden">
+                <div class="absolute -right-4 -top-4 text-slate-700 opacity-50 text-8xl">💰</div>
+                <p class="text-slate-400 font-medium relative z-10">Est. MRR ($99/mo per Tenant)</p>
+                <p id="mrr-display" class="text-4xl font-bold text-green-400 mt-1 relative z-10">$0.00</p>
+            </div>
+            <div class="bg-slate-800 p-6 rounded-lg border border-slate-700 shadow flex flex-col justify-center relative overflow-hidden">
+                <div class="absolute -right-4 -top-4 text-slate-700 opacity-50 text-8xl">🏢</div>
+                <p class="text-slate-400 font-medium relative z-10">Active Bakeries</p>
+                <p id="tenant-count-display" class="text-4xl font-bold text-indigo-400 mt-1 relative z-10">0</p>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            
+            <section class="lg:col-span-1 space-y-8">
+                <div>
+                    <h2 class="text-xl font-bold text-white mb-4">Live Platform Activity</h2>
+                    <div class="bg-slate-800 p-4 rounded-lg border border-slate-700 shadow h-96 overflow-y-auto">
+                        <ul id="activity-feed" class="space-y-4">
+                            </ul>
+                    </div>
+                </div>
+
+                <div>
+                    <h2 class="text-xl font-bold text-white mb-4">Global Controls</h2>
+                    <div class="bg-slate-800 p-6 rounded-lg border border-slate-700 shadow space-y-4">
+                        <div class="flex items-center justify-between">
+                            <span class="text-slate-300 font-medium">New Registrations</span>
+                            <label class="relative inline-flex items-center cursor-pointer">
+                                <input type="checkbox" class="sr-only peer" checked>
+                                <div class="w-11 h-6 bg-slate-600 rounded-full peer peer-checked:bg-indigo-500 after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:after:translate-x-full"></div>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="lg:col-span-2 space-y-8">
+                
+                <div>
+                    <h2 class="text-xl font-bold text-white mb-4">Registered Bakeries</h2>
+                    <div class="bg-slate-800 rounded-lg border border-slate-700 shadow overflow-hidden h-64 overflow-y-auto">
+                        <table class="w-full text-left border-collapse">
+                            <thead>
+                                <tr class="bg-slate-900 text-slate-400 text-xs uppercase sticky top-0 border-b border-slate-700">
+                                    <th class="p-3 font-medium">ID</th>
+                                    <th class="p-3 font-medium">Business Name</th>
+                                    <th class="p-3 font-medium">Domain</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tenants-table-body" class="text-sm divide-y divide-slate-700"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div>
+                    <h2 class="text-xl font-bold text-white mb-4">Global User Directory</h2>
+                    <div class="bg-slate-800 rounded-lg border border-slate-700 shadow overflow-hidden h-64 overflow-y-auto">
+                        <table class="w-full text-left border-collapse">
+                            <thead>
+                                <tr class="bg-slate-900 text-slate-400 text-xs uppercase sticky top-0 border-b border-slate-700">
+                                    <th class="p-3 font-medium">User ID</th>
+                                    <th class="p-3 font-medium">Username</th>
+                                    <th class="p-3 font-medium">Bakery (Tenant)</th>
+                                    <th class="p-3 font-medium">Role</th>
+                                    <th class="p-3 font-medium text-right">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="users-table-body" class="text-sm divide-y divide-slate-700"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4">
+                    <div class="bg-slate-800 p-6 rounded-lg border border-slate-700 shadow">
+                        <h3 class="font-bold text-white mb-4">1. Onboard New Bakery</h3>
+                        <form id="create-tenant-form" class="space-y-4">
+                            <input type="text" id="tenant-name" class="w-full p-2 bg-slate-900 border border-slate-600 rounded text-white" placeholder="Business Name" required>
+                            <input type="email" id="tenant-email" class="w-full p-2 bg-slate-900 border border-slate-600 rounded text-white" placeholder="Contact Email" required>
+                            <button type="submit" class="w-full bg-indigo-600 text-white font-bold py-2 rounded">Create Tenant</button>
+                        </form>
+                    </div>
+
+                    <div class="bg-slate-800 p-6 rounded-lg border border-slate-700 shadow">
+                        <h3 class="font-bold text-white mb-4">2. Issue Owner Account</h3>
+                        <form id="create-user-form" class="space-y-4">
+                            <input type="number" id="user-tenant-id" class="w-full p-2 bg-slate-900 border border-slate-600 rounded text-white" placeholder="Target Tenant ID" required>
+                            <div class="grid grid-cols-2 gap-2">
+                                <input type="text" id="user-username" class="w-full p-2 bg-slate-900 border border-slate-600 rounded text-white" placeholder="Username" required>
+                                <input type="text" id="user-password" class="w-full p-2 bg-slate-900 border border-slate-600 rounded text-white" placeholder="Password" required>
+                            </div>
+                            <button type="submit" class="w-full bg-emerald-600 text-white font-bold py-2 rounded">Register User</button>
+                        </form>
+                    </div>
+                </div>
+
+            </section>
+        </div>
+    </main>
+
+    <script>
+        const API_URL = 'http://localhost:8100';
+
+        document.addEventListener('DOMContentLoaded', refreshAll);
+
+        function refreshAll() {
+            fetchGlobalStats();
+            fetchTenants();
+            fetchUsers();
+            fetchActivity();
+        }
+
+        async function fetchGlobalStats() {
+            try {
+                const res = await fetch(`${API_URL}/admin/global-stats`);
+                if (res.ok) {
+                    const data = await res.json();
+                    document.getElementById('global-stats-display').textContent = data.total_transactions_managed;
+                }
+            } catch (err) { console.error(err); }
+        }
+
+        async function fetchTenants() {
+            try {
+                const res = await fetch(`${API_URL}/admin/list-tenants`);
+                const tenants = await res.json();
+                
+                document.getElementById('tenant-count-display').textContent = tenants.length;
+                document.getElementById('mrr-display').textContent = `$${(tenants.length * 99.00).toFixed(2)}`;
+
+                document.getElementById('tenants-table-body').innerHTML = tenants.map(t => `
+                    <tr class="hover:bg-slate-700 transition border-b border-slate-700/50">
+                        <td class="p-3 text-slate-400">#${t.id}</td>
+                        <td class="p-3 font-bold text-indigo-300">${t.business_name}</td>
+                        <td class="p-3 text-slate-400">${t.domain}</td>
+                    </tr>
+                `).join('');
+            } catch (err) { console.error(err); }
+        }
+
+        async function fetchUsers() {
+            try {
+                const res = await fetch(`${API_URL}/admin/list-users`);
+                const users = await res.json();
+                
+                document.getElementById('users-table-body').innerHTML = users.map(u => `
+                    <tr class="hover:bg-slate-700 transition border-b border-slate-700/50">
+                        <td class="p-3 text-slate-400">#${u.id}</td>
+                        <td class="p-3 font-medium text-slate-200">${u.username}</td>
+                        <td class="p-3 text-indigo-300">${u.business_name} (ID: ${u.tenant_id})</td>
+                        <td class="p-3 text-slate-400 uppercase text-xs">${u.role}</td>
+                        <td class="p-3 text-right space-x-3">
+                            <button onclick="loginAsUser(${u.id})" class="text-blue-400 hover:text-blue-300 text-sm font-bold">Login As</button>
+                            <button onclick="deleteUser(${u.id})" class="text-red-400 hover:text-red-300 text-sm font-bold">Delete</button>
+                        </td>
+                    </tr>
+                `).join('');
+            } catch (err) { console.error(err); }
+        }
+
+        async function loginAsUser(id) {
+            if(!confirm("Are you sure you want to log in as this user? You will be redirected to their dashboard.")) return;
+            
+            try {
+                const res = await fetch(`${API_URL}/admin/impersonate/${id}`, { method: 'POST' });
+                if(!res.ok) throw new Error("Failed to generate token");
+                
+                const data = await res.json();
+                
+                // 1. Overwrite your local token with this user's newly generated token
+                localStorage.setItem('bakery_token', data.access_token);
+                
+                // 2. Redirect your browser straight to the main app dashboard
+                window.location.href = 'index.html'; 
+            } catch (err) { 
+                console.error(err); 
+                alert("Could not log in as user.");
+            }
+        }
+
+        async function fetchActivity() {
+            try {
+                const res = await fetch(`${API_URL}/admin/recent-activity`);
+                const activity = await res.json();
+                
+                document.getElementById('activity-feed').innerHTML = activity.map(a => `
+                    <li class="p-3 bg-slate-900 border border-slate-700 rounded-lg flex justify-between items-center">
+                        <div>
+                            <p class="text-sm font-bold text-indigo-300">${a.tenant_name}</p>
+                            <p class="text-xs text-slate-400">Sold: <span class="text-slate-200">${a.product_name}</span></p>
+                        </div>
+                        <div class="text-right">
+                            <p class="font-bold text-green-400">+$${a.amount.toFixed(2)}</p>
+                            <p class="text-[10px] text-slate-500">${new Date(a.time).toLocaleTimeString()}</p>
+                        </div>
+                    </li>
+                `).join('');
+            } catch (err) { console.error(err); }
+        }
+
+        async function deleteUser(id) {
+            if(!confirm("Are you sure you want to permanently delete this user?")) return;
+            try {
+                const res = await fetch(`${API_URL}/admin/delete-user/${id}`, { method: 'DELETE' });
+                if(res.ok) fetchUsers();
+                else alert("Failed to delete user");
+            } catch (err) { console.error(err); }
+        }
+
+        document.getElementById('create-tenant-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            try {
+                const res = await fetch(`${API_URL}/tenants/`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        name: document.getElementById('tenant-name').value, 
+                        email: document.getElementById('tenant-email').value 
+                    })
+                });
+                const data = await res.json();
+                document.getElementById('user-tenant-id').value = data.id;
+                e.target.reset();
+                refreshAll(); 
+            } catch (err) { console.error(err); }
+        });
+
+        document.getElementById('create-user-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            try {
+                await fetch(`${API_URL}/tenants/register-user`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        tenant_id: parseInt(document.getElementById('user-tenant-id').value), 
+                        username: document.getElementById('user-username').value, 
+                        password: document.getElementById('user-password').value, 
+                        role: "owner" 
+                    })
+                });
+                alert("User Registered!");
+                e.target.reset();
+                refreshAll();
+            } catch (err) { console.error(err); }
+        });
+    </script>
+</body>
+</html>
 
 ##############################

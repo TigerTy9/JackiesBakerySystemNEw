@@ -1,0 +1,17 @@
+You are totally right. While the core foundation is extremely solid, the current architecture actually functions more like a standard retail POS than a true *production* bakery system.
+
+If we look closely at how real bakeries operate (and cross-reference your system plan), there are a few massive missing pieces we need to add to the backend to make this a complete SaaS product.
+
+### 1. Production Runs (Decoupling Baking from Selling)
+[cite_start]Right now, your POS endpoint triggers the `process_bake_and_calculate_margins` function, which deducts raw ingredients exactly when a customer buys a croissant[cite: 92, 121]. In reality, a bakery produces a batch of 100 croissants at 4:00 AM, deducting the raw flour and butter then, and sells the finished goods throughout the day. We need to create `ProductionRun` database models that convert raw `IngredientLots` into a daily pool of `FinishedGoodsInventory`.
+
+### 2. Finished Goods Spoilage
+[cite_start]Your current `WasteLog` model only tracks raw ingredient spoilage, linking directly to the `ingredients` and `ingredient_lots` tables[cite: 18, 19]. Bakeries throw away, discount, or donate unsold bread at the end of every single day. If we don't track the waste of finished goods, the true profit margins will be wildly inaccurate because the cost of the unsold items isn't being accounted for.
+
+### 3. Overhead & Labor Apportionment
+[cite_start]As outlined in your system plan, for the margin analysis to be perfectly accurate, the system should eventually allow the user to input hourly labor costs and fixed overhead (like web domain hosting, email services, or kitchen rental) to calculate the true Net Margin, not just the Gross Margin of the ingredients. [cite: 80]
+
+### 4. Daily Bake Schedules
+Bakers need a consolidated "Prep List" or dashboard view when they arrive early in the morning. [cite_start]This requires a new backend route that aggregates all standard retail requirements alongside the `CustomOrder` items that have a status of "Baking Scheduled"[cite: 76]. 
+
+Which of these bakery-specific backend workflows should we build the database models and FastAPI routes for first?

@@ -183,3 +183,21 @@ def list_ingredients(
     ingredients = db.query(models.Ingredient).all()
     
     return ingredients
+
+@router.get("/stock-levels", response_model=List[schemas.IngredientStockResponse])
+def get_stock_levels(db: Session = Depends(get_tenant_db)):
+    """
+    Calculates the total quantity on hand for every ingredient 
+    by summing up all non-depleted lots.
+    """
+    # We join Ingredients and IngredientLots to get names and quantities together
+    stock = db.query(
+        models.Ingredient.id.label("ingredient_id"),
+        models.Ingredient.name,
+        func.sum(models.IngredientLot.quantity_remaining).label("total_quantity"),
+        models.Ingredient.base_unit
+    ).join(models.IngredientLot).filter(
+        models.IngredientLot.is_depleted == False
+    ).group_by(models.Ingredient.id).all()
+    
+    return stock

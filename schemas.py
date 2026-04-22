@@ -26,12 +26,14 @@ class SaleCreate(BaseModel):
 class SaleResponse(BaseModel):
     id: int
     tenant_id: int
-    total_amount: float
-    created_at: datetime
+    sale_price: float  # Changed from total_amount to sale_price
+    margin_fifo: float # Add these to see your margins in the response
+    margin_newest: float
+    timestamp: datetime # Changed from created_at to timestamp to match models.py
 
     class Config:
-        from_attributes = True  # This allows Pydantic to read data from SQLAlchemy models
-
+        from_attributes = True
+        
 class TenantBase(BaseModel):
     name: str  # We'll map this to business_name
     email: EmailStr
@@ -75,6 +77,76 @@ class UserResponse(BaseModel):
     tenant_id: int
     username: str
     role: str
+
+    class Config:
+        from_attributes = True
+
+class CustomOrderItemCreate(BaseModel):
+    product_id: int
+    quantity: int
+    price_override: Optional[float] = None
+
+class CustomOrderItemResponse(BaseModel):
+    id: int
+    product_id: int
+    quantity: int
+    price_override: Optional[float]
+    
+    class Config:
+        from_attributes = True
+
+class CustomOrderCreate(BaseModel):
+    customer_name: str
+    customer_email: Optional[str] = None
+    description: str
+    delivery_date: datetime
+    items: List[CustomOrderItemCreate] = []
+
+class CustomOrderUpdate(BaseModel):
+    total_price: Optional[float] = None
+    deposit_amount: Optional[float] = None
+    status: Optional[str] = None
+
+class CustomOrderResponse(BaseModel):
+    id: int
+    tenant_id: int
+    customer_name: str
+    customer_email: Optional[str]
+    description: str
+    total_price: Optional[float]
+    deposit_amount: float
+    status: str
+    delivery_date: datetime
+    created_at: datetime
+    items: List[CustomOrderItemResponse] = []
+
+    class Config:
+        from_attributes = True
+
+class RecipeItemResponse(BaseModel):
+    id: int
+    ingredient_id: int
+    quantity_required: float
+
+    class Config:
+        from_attributes = True
+
+class ProductResponse(BaseModel):
+    id: int
+    tenant_id: int
+    name: str
+    retail_price: float
+    # Maps directly to the 'recipe_items' relationship in models.py
+    recipe_items: List[RecipeItemResponse] = [] 
+
+    class Config:
+        from_attributes = True
+
+class IngredientStockResponse(BaseModel):
+    ingredient_id: int
+    name: str
+    total_quantity: float
+    base_unit: str
 
     class Config:
         from_attributes = True
