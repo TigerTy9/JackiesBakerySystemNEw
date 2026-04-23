@@ -63,8 +63,23 @@ def update_order_pipeline(
 
 @router.get("/pipeline", response_model=List[schemas.CustomOrderResponse])
 def get_active_orders(db: Session = Depends(get_tenant_db)):
-    # Returns all orders not yet completed or cancelled
-    orders = db.query(models.CustomOrder).filter(
-        models.CustomOrder.status.notin_([models.OrderStatus.COMPLETED, models.OrderStatus.CANCELLED])
-    ).order_by(models.CustomOrder.delivery_date).all()
-    return orders
+    """
+    Returns only orders currently in the work pipeline.
+    Hides Completed and Cancelled orders to keep the dashboard clean.
+    """
+    return db.query(models.CustomOrder).filter(
+        models.CustomOrder.status.notin_([
+            models.OrderStatus.COMPLETED, 
+            models.OrderStatus.CANCELLED
+        ])
+    ).order_by(models.CustomOrder.delivery_date.asc()).all()
+
+@router.get("/history", response_model=List[schemas.CustomOrderResponse])
+def get_order_history(db: Session = Depends(get_tenant_db)):
+    """Returns only Completed and Cancelled orders for auditing."""
+    return db.query(models.CustomOrder).filter(
+        models.CustomOrder.status.in_([
+            models.OrderStatus.COMPLETED, 
+            models.OrderStatus.CANCELLED
+        ])
+    ).order_by(models.CustomOrder.delivery_date.desc()).all()

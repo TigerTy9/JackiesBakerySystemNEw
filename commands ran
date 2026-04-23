@@ -60,3 +60,10 @@ docker compose up
     }
   ]
 }
+
+docker compose up -d --force-recreate --build backend
+
+
+##ADDING IN NEW COLUMN FOR LEAD TIME IN DAYS TO PRODUCTS TABLE
+docker exec -it bakery_db_container psql -U ty_admin -d bakery_saas
+ALTER TABLE products ADD COLUMN lead_time_days INTEGER DEFAULT 0;

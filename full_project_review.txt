@@ -329,6 +329,8 @@ class Product(Base):
     name = Column(String)
     retail_price = Column(Float)
     
+    lead_time_days = Column(Integer, default=0) 
+    
     tenant = relationship("Tenant", back_populates="products")
     recipe_items = relationship("RecipeItem", back_populates="product")
 
@@ -474,6 +476,34 @@ class LaborLog(Base):
     hours_spent = Column(Float)
     hourly_rate = Column(Float) # The wage of the baker for this specific batch
     total_labor_cost = Column(Float) # Calculated as hours * rate
+
+class ProductParLevel(Base):
+    """Target daily stock levels for standard retail items."""
+    __tablename__ = "product_par_levels"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id"))
+    product_id = Column(Integer, ForeignKey("products.id"), unique=True)
+    
+    target_quantity = Column(Integer, default=0) # Amount needed at start of day
+    
+    tenant = relationship("Tenant")
+    product = relationship("Product")
+
+class PlannedBatch(Base):
+    """Allows bakers to manually schedule one-off production runs for specific dates."""
+    __tablename__ = "planned_batches"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id"))
+    product_id = Column(Integer, ForeignKey("products.id"))
+    
+    planned_quantity = Column(Integer)
+    scheduled_date = Column(DateTime) # The day this needs to show up on the Prep List
+    is_completed = Column(Boolean, default=False)
+    
+    tenant = relationship("Tenant")
+    product = relationship("Product")
 
 ##############################
 
@@ -647,12 +677,20 @@ docker compose up
   ]
 }
 
+docker compose up -d --force-recreate --build backend
+
+
+##ADDING IN NEW COLUMN FOR LEAD TIME IN DAYS TO PRODUCTS TABLE
+docker exec -it bakery_db_container psql -U ty_admin -d bakery_saas
+ALTER TABLE products ADD COLUMN lead_time_days INTEGER DEFAULT 0;
+
 ##############################
 
 
 FILE: utils.py
 --------------
 # utils.py
+import models
 
 def convert_to_base(quantity: float, from_unit: str, multiplier: float) -> float:
     """
@@ -844,7 +882,7 @@ def get_current_user_info(current_user: models.User = Depends(auth.get_current_u
 FILE: crud.py
 -------------
 from sqlalchemy.orm import Session
-from sqlalchemy import desc
+from sqlalchemy import desc, func
 import models, schemas
 
 def execute_production_run(
@@ -1108,9 +1146,15 @@ class RecipeItemCreate(BaseModel):
     quantity_required: float
     is_non_food: bool = False
 
+class PlannedBatchCreate(BaseModel):
+    product_id: int
+    planned_quantity: int
+    scheduled_date: datetime
+    
 class ProductCreate(BaseModel):
     name: str
     retail_price: float
+    lead_time_days: int = 0
     recipe: List[RecipeItemCreate]
 
 class SaleCreate(BaseModel):
@@ -1233,12 +1277,12 @@ class ProductResponse(BaseModel):
     tenant_id: int
     name: str
     retail_price: float
-    # Maps directly to the 'recipe_items' relationship in models.py
+    lead_time_days: int  # Added field
     recipe_items: List[RecipeItemResponse] = [] 
 
     class Config:
         from_attributes = True
-
+        
 class IngredientStockResponse(BaseModel):
     ingredient_id: int
     name: str
@@ -1274,6 +1318,23 @@ class OverheadCreate(OverheadBase):
 class OverheadResponse(OverheadBase):
     id: int
     tenant_id: int
+
+    class Config:
+        from_attributes = True
+
+class PlannedBatchCreate(BaseModel):
+    product_id: int
+    planned_quantity: int
+    scheduled_date: datetime
+
+class PrepListItem(BaseModel):
+    product_id: int
+    product_name: str
+    current_inventory: int
+    retail_par_needed: int
+    custom_order_needed: int
+    planned_batch_needed: int 
+    total_to_bake: int
 
     class Config:
         from_attributes = True
@@ -1348,11 +1409,26 @@ def update_order_pipeline(
 
 @router.get("/pipeline", response_model=List[schemas.CustomOrderResponse])
 def get_active_orders(db: Session = Depends(get_tenant_db)):
-    # Returns all orders not yet completed or cancelled
-    orders = db.query(models.CustomOrder).filter(
-        models.CustomOrder.status.notin_([models.OrderStatus.COMPLETED, models.OrderStatus.CANCELLED])
-    ).order_by(models.CustomOrder.delivery_date).all()
-    return orders
+    """
+    Returns only orders currently in the work pipeline.
+    Hides Completed and Cancelled orders to keep the dashboard clean.
+    """
+    return db.query(models.CustomOrder).filter(
+        models.CustomOrder.status.notin_([
+            models.OrderStatus.COMPLETED, 
+            models.OrderStatus.CANCELLED
+        ])
+    ).order_by(models.CustomOrder.delivery_date.asc()).all()
+
+@router.get("/history", response_model=List[schemas.CustomOrderResponse])
+def get_order_history(db: Session = Depends(get_tenant_db)):
+    """Returns only Completed and Cancelled orders for auditing."""
+    return db.query(models.CustomOrder).filter(
+        models.CustomOrder.status.in_([
+            models.OrderStatus.COMPLETED, 
+            models.OrderStatus.CANCELLED
+        ])
+    ).order_by(models.CustomOrder.delivery_date.desc()).all()
 
 ##############################
 
@@ -1364,6 +1440,8 @@ from sqlalchemy.orm import Session
 import models, schemas, crud
 from auth import get_current_user, get_tenant_db
 from typing import List
+from sqlalchemy import func, cast, Date
+from datetime import datetime
 
 router = APIRouter(prefix="/production", tags=["Production Runs"])
 
@@ -1443,6 +1521,118 @@ def log_production_waste(
         return waste_record
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+@router.post("/schedule-batch")
+def schedule_planned_batch(
+    batch: schemas.PlannedBatchCreate,
+    db: Session = Depends(get_tenant_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    """Allows a manager to manually inject a production run for a specific date."""
+    new_batch = models.PlannedBatch(
+        tenant_id=current_user.tenant_id,
+        product_id=batch.product_id,
+        planned_quantity=batch.planned_quantity,
+        scheduled_date=batch.scheduled_date
+    )
+    db.add(new_batch)
+    db.commit()
+    db.refresh(new_batch)
+    return new_batch
+
+@router.get("/prep-list", response_model=List[schemas.PrepListItem])
+def get_daily_prep_list(
+    db: Session = Depends(get_tenant_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    """
+    Generates the morning prep list by calculating:
+    (Retail Par + Custom Orders + Planned Batches) - Current Stock.
+    """
+    products = db.query(models.Product).all()
+    today = datetime.utcnow().date()
+    
+    # 1. Pull CURRENT stock from the counter (Finished Goods)
+    current_stock = db.query(
+        models.FinishedGoodsLot.product_id,
+        func.sum(models.FinishedGoodsLot.quantity_remaining).label("qty")
+    ).filter(
+        models.FinishedGoodsLot.is_depleted == False,
+        models.FinishedGoodsLot.tenant_id == current_user.tenant_id
+    ).group_by(models.FinishedGoodsLot.product_id).all()
+    stock_map = {item.product_id: int(item.qty) for item in current_stock}
+
+    # 2. Pull Demand - CUSTOM ORDERS ONLY (Quote orders moved to schedule)
+    # Filters by orders marked as "Baking Scheduled" minus lead time [cite: 25, 53]
+    custom_orders = db.query(
+        models.CustomOrderItem.product_id,
+        func.sum(models.CustomOrderItem.quantity).label("qty")
+    ).join(models.CustomOrder, models.CustomOrderItem.custom_order_id == models.CustomOrder.id)\
+     .join(models.Product, models.CustomOrderItem.product_id == models.Product.id)\
+     .filter(
+        models.CustomOrder.tenant_id == current_user.tenant_id,
+        models.CustomOrder.status == models.OrderStatus.BAKING_SCHEDULED,
+        (cast(models.CustomOrder.delivery_date, Date) - models.Product.lead_time_days) == today
+    ).group_by(models.CustomOrderItem.product_id).all()
+    custom_map = {item.product_id: int(item.qty) for item in custom_orders}
+
+    # 3. Pull Demand - PLANNED BATCHES ONLY (Manual entries)
+    # Filters manual bakes scheduled for today minus lead time [cite: 33]
+    planned_batches = db.query(
+        models.PlannedBatch.product_id,
+        func.sum(models.PlannedBatch.planned_quantity).label("qty")
+    ).join(models.Product, models.PlannedBatch.product_id == models.Product.id)\
+     .filter(
+        models.PlannedBatch.tenant_id == current_user.tenant_id,
+        (cast(models.PlannedBatch.scheduled_date, Date) - models.Product.lead_time_days) == today,
+        models.PlannedBatch.is_completed == False
+    ).group_by(models.PlannedBatch.product_id).all()
+    planned_map = {item.product_id: int(item.qty) for item in planned_batches}
+
+    # 4. Get Retail Par Levels 
+    par_map = {
+        par.product_id: int(par.target_quantity) 
+        for par in db.query(models.ProductParLevel).filter(
+            models.ProductParLevel.tenant_id == current_user.tenant_id
+        ).all()
+    }
+
+    prep_list = []
+    for product in products:
+        on_hand = stock_map.get(product.id, 0)
+        par = par_map.get(product.id, 0)
+        custom = custom_map.get(product.id, 0)
+        planned = planned_map.get(product.id, 0)
+        
+        # --- THE COUNTDOWN MATH ---
+        total_demand = par + custom + planned
+        net_to_bake = max(0, total_demand - on_hand)
+        
+        if total_demand > 0:
+            # We show the RAW demand for Custom and Planned so the baker sees them,
+            # but we use the Waterfall to show the REMAINING retail par needed.
+            
+            # Use on_hand to satisfy Retail Par first
+            disp_retail = max(0, par - on_hand)
+            
+            # For Custom and Planned, we show the TOTAL needed for today 
+            # so they appear in their respective columns.
+            disp_custom = custom 
+            disp_planned = planned
+
+            prep_list.append(
+                schemas.PrepListItem(
+                    product_id=product.id,
+                    product_name=product.name,
+                    current_inventory=on_hand,
+                    retail_par_needed=disp_retail,
+                    custom_order_needed=disp_custom,
+                    planned_batch_needed=disp_planned,
+                    total_to_bake=net_to_bake 
+                )
+            )
+            
+    return prep_list
 
 ##############################
 
@@ -1836,6 +2026,7 @@ from auth import get_current_user
 from typing import List
 from auth import get_tenant_db
 from sqlalchemy import func
+from datetime import datetime
 
 # This is what main.py is looking for
 router = APIRouter(
@@ -3404,7 +3595,7 @@ FILE: frontend/homepage.html
         <div class="modal-card">
             <button onclick="toggleLogin(false)" class="modal-close">✕</button>
             <div class="modal-header">
-                <h2 class="modal-brand">FLOURish™<span>.</span></h2>
+                <h2 class="modal-brand">FLOURish<span>.</span></h2>
                 <p class="modal-subtitle">Tenant Portal</p>
             </div>
             <form id="login-form">
@@ -3643,6 +3834,7 @@ FILE: frontend/index.html
             <nav class="flex-1 p-4 space-y-2">
                 <button onclick="showSection('inventory')" class="w-full text-left p-2 hover:bg-indigo-800 rounded">📦 Inventory</button>
                 <button onclick="showSection('products')" class="w-full text-left p-2 hover:bg-indigo-800 rounded">🥐 Products & POS</button>
+                <button onclick="showSection('prep-list')" class="w-full text-left p-2 hover:bg-indigo-800 rounded">📋 Daily Prep List</button>
                 <button onclick="showSection('orders')" class="w-full text-left p-2 hover:bg-indigo-800 rounded">📋 Custom Orders</button>
                 <button onclick="showSection('finances')" class="w-full text-left p-2 hover:bg-indigo-800 rounded">💰 Finances</button>
                 <button onclick="showSection('transactions')" class="text-left p-2 hover:bg-indigo-800 rounded">📖 Ledger</button>
@@ -3722,7 +3914,7 @@ FILE: frontend/index.html
                 <div class="bg-white border rounded shadow p-4">
                     <h3 class="font-bold text-lg mb-4">Create New Product & Recipe</h3>
                     <form id="add-product-form" class="space-y-4">
-                        <div class="grid grid-cols-2 gap-4">
+                        <div class="grid grid-cols-3 gap-4">
                             <div>
                                 <label class="block text-sm font-medium">Product Name</label>
                                 <input type="text" id="prod-name" class="w-full p-2 border rounded" required>
@@ -3731,8 +3923,12 @@ FILE: frontend/index.html
                                 <label class="block text-sm font-medium">Retail Price ($)</label>
                                 <input type="number" step="0.01" id="prod-price" class="w-full p-2 border rounded" required>
                             </div>
+                            <div>
+                                <label class="block text-sm font-medium">Prep Time (Days)</label>
+                                <input type="number" id="prod-lead-time" class="w-full p-2 border rounded" value="1" min="0">
+                                <p class="text-[10px] text-gray-400 mt-1">0 = Same day, 1 = Start day before, 2+ = Multi-day fermentation.</p>
+                            </div>
                         </div>
-                        
                         <div class="bg-gray-50 p-3 rounded border">
                             <div class="flex justify-between items-center mb-2">
                                 <label class="block text-sm font-medium">Bill of Materials (Recipe)</label>
@@ -3752,6 +3948,56 @@ FILE: frontend/index.html
                     </div>
                     <div id="sale-alert" class="hidden mb-4 p-4 rounded text-white font-bold text-center"></div>
                     <div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-6" id="products-grid"></div>
+                </div>
+            </section>
+
+           <section id="section-prep-list" class="hidden space-y-6">
+                <div class="flex justify-between items-center">
+                    <div>
+                        <h2 class="text-3xl font-bold">Daily Bake Schedule</h2>
+                        <p class="text-sm text-gray-500 mt-1">Aggregated retail par levels, custom orders, and planned batches.</p>
+                    </div>
+                    <button onclick="fetchPrepList()" class="bg-blue-500 text-white px-4 py-2 rounded font-bold shadow hover:bg-blue-600 transition">
+                        Refresh List
+                    </button>
+                </div>
+
+                <div class="bg-white border rounded shadow p-4">
+                    <h3 class="font-bold text-lg mb-4">Schedule a Manual Batch</h3>
+                    <form id="schedule-batch-form" class="space-y-4">
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div>
+                                <label class="block text-sm font-medium">Product ID</label>
+                                <input type="number" id="plan-prod-id" class="w-full p-2 border rounded" placeholder="e.g. 1" required>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium">Quantity to Bake</label>
+                                <input type="number" id="plan-qty" class="w-full p-2 border rounded" placeholder="e.g. 50" required>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium">Scheduled Date</label>
+                                <input type="date" id="plan-date" class="w-full p-2 border rounded" required>
+                            </div>
+                        </div>
+                        <button type="submit" class="bg-indigo-600 text-white px-4 py-2 rounded hover:bg-indigo-700 w-full font-bold">Schedule Batch</button>
+                    </form>
+                </div>
+                
+                <div class="bg-white border rounded shadow overflow-hidden">
+                    <table class="w-full text-left border-collapse">
+                        <thead>
+                            <tr class="bg-gray-100 text-sm uppercase tracking-wider text-gray-600">
+                                <th class="p-4 border-b font-bold">Product Name</th>
+                                <th class="p-4 border-b text-center font-bold">On Hand</th> <th class="p-4 border-b text-center font-bold">Retail Par Needed</th>
+                                <th class="p-4 border-b text-center font-bold">Custom Orders</th>
+                                <th class="p-4 border-b text-center font-bold text-blue-600">Planned Batches</th> 
+                                <th class="p-4 border-b text-center font-black text-indigo-700">Total to Bake</th>
+                                <th class="p-4 border-b text-right font-bold">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="prep-list-table-body" class="text-sm divide-y divide-gray-100">
+                            </tbody>
+                    </table>
                 </div>
             </section>
 
@@ -3788,11 +4034,16 @@ FILE: frontend/index.html
                     </form>
                 </div>
 
-                <div class="bg-white rounded shadow p-4">
-                    <div class="flex justify-between items-center mb-4">
-                        <h3 class="font-bold text-xl">Active Pipeline</h3>
-                        <button onclick="fetchOrders()" class="bg-blue-500 text-white px-4 py-2 rounded">Refresh Pipeline</button>
-                    </div>
+                <div class="flex space-x-4 mb-4">
+                    <button id="btn-active-pipeline" onclick="fetchOrders('active')" 
+                            class="bg-indigo-600 text-white px-4 py-2 rounded font-bold shadow-sm transition">
+                        Active Pipeline
+                    </button>
+                    <button id="btn-order-history" onclick="fetchOrders('history')" 
+                            class="bg-gray-200 text-gray-700 px-4 py-2 rounded font-bold hover:bg-gray-300 transition">
+                        Order History (Picked Up)
+                    </button>
+                </div>
                     <table class="w-full text-left border-collapse">
                         <thead>
                             <tr class="bg-gray-100 text-sm">
@@ -3985,6 +4236,7 @@ function showSection(sectionId) {
         fetchOverheadExpenses();
     }
     if (sectionId === 'transactions') fetchTransactionHistory();
+    if (sectionId === 'prep-list') fetchPrepList();
 }
 
 async function fetchUserInfo() {
@@ -4174,31 +4426,51 @@ function addRecipeRow() {
 
 document.getElementById('add-product-form').addEventListener('submit', async (e) => {
     e.preventDefault();
+    
+    // 1. Capture basic product info and the new Lead Time value
     const name = document.getElementById('prod-name').value;
     const price = document.getElementById('prod-price').value;
+    const leadTime = document.getElementById('prod-lead-time').value; // New field for prep days
     
-    // Parse dynamic rows
+    // 2. Parse dynamic recipe rows (Bill of Materials)
     const recipe = [];
     document.querySelectorAll('.recipe-row').forEach(row => {
         const ingId = row.querySelector('.ing-id').value;
         const qty = row.querySelector('.ing-qty').value;
         if(ingId && qty) {
-            recipe.push({ ingredient_id: parseInt(ingId), quantity_required: parseFloat(qty) });
+            recipe.push({ 
+                ingredient_id: parseInt(ingId), 
+                quantity_required: parseFloat(qty) 
+            });
         }
     });
 
     try {
+        // 3. Send the data to the API including lead_time_days
         const res = await fetch(`${API_URL}/products/`, {
             method: 'POST',
-            headers: getHeaders(),
-            body: JSON.stringify({ name, retail_price: parseFloat(price), recipe })
+            headers: getHeaders(), 
+            body: JSON.stringify({ 
+                name, 
+                retail_price: parseFloat(price),
+                lead_time_days: parseInt(leadTime), // Added to match updated Pydantic schema
+                recipe 
+            })
         });
+
+        // 4. Handle response and UI reset
         if (!res.ok) throw await res.json();
+        
         alert("Product and Recipe saved!");
+        
+        // Reset form and dynamic recipe rows
         e.target.reset();
         document.getElementById('recipe-rows').innerHTML = '';
-        addRecipeRow();
+        addRecipeRow(); // Add back one empty starting row
+        
+        // Refresh the POS grid to show the new product
         fetchProducts();
+
     } catch (err) {
         alert(err.detail || "Failed to save product");
     }
@@ -4373,33 +4645,57 @@ document.getElementById('add-order-form').addEventListener('submit', async (e) =
     }
 });
 
-async function fetchOrders() {
+async function fetchOrders(view = 'active') {
+    // 1. Update Button UI Styles
+    const activeBtn = document.getElementById('btn-active-pipeline');
+    const historyBtn = document.getElementById('btn-order-history');
+
+    if (view === 'active') {
+        activeBtn.className = "bg-indigo-600 text-white px-4 py-2 rounded font-bold shadow-sm transition";
+        historyBtn.className = "bg-gray-200 text-gray-700 px-4 py-2 rounded font-bold hover:bg-gray-300 transition";
+    } else {
+        historyBtn.className = "bg-indigo-600 text-white px-4 py-2 rounded font-bold shadow-sm transition";
+        activeBtn.className = "bg-gray-200 text-gray-700 px-4 py-2 rounded font-bold hover:bg-gray-300 transition";
+    }
+
+    // 2. Fetch Data
+    // 'active' uses /orders/pipeline (hides completed)
+    // 'history' uses /orders/history (shows only completed/cancelled)
+    const endpoint = view === 'active' ? '/orders/pipeline' : '/orders/history';
+
     try {
-        const res = await fetch(`${API_URL}/orders/pipeline`, { headers: getHeaders() });
+        const res = await fetch(`${API_URL}${endpoint}`, { headers: getHeaders() });
         if (res.status === 401) return logout();
         const orders = await res.json();
         
         const tbody = document.getElementById('orders-table-body');
+        
+        if (orders.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="4" class="p-8 text-center text-gray-400 italic">No orders found in this view.</td></tr>`;
+            return;
+        }
+
         tbody.innerHTML = orders.map(order => `
-            <tr>
-                <td class="p-2 border-b font-medium">#${order.id}</td>
-                <td class="p-2 border-b">${order.customer_name}</td>
-                <td class="p-2 border-b">${new Date(order.delivery_date).toLocaleDateString()}</td>
+            <tr class="hover:bg-gray-50 transition border-b border-gray-100 ${order.status === 'Completed' ? 'opacity-60 bg-gray-50' : ''}">
+                <td class="p-2 border-b font-medium text-indigo-900">#${order.id}</td>
+                <td class="p-2 border-b font-bold">${order.customer_name}</td>
+                <td class="p-2 border-b text-gray-500">${new Date(order.delivery_date).toLocaleDateString()}</td>
                 <td class="p-2 border-b">
-                    <span class="px-2 py-1 bg-yellow-100 text-yellow-800 text-xs rounded-full font-bold">
-                        <select onchange="updateOrderStatus(${order.id}, this.value)" class="p-1 border rounded text-xs font-bold">
-                            <option value="Quote Pending" ${order.status === 'Quote Pending' ? 'selected' : ''}>Quote Pending</option>
-                            <option value="Deposit Paid" ${order.status === 'Deposit Paid' ? 'selected' : ''}>Deposit Paid</option>
-                            <option value="Baking Scheduled" ${order.status === 'Baking Scheduled' ? 'selected' : ''}>Baking Scheduled</option>
-                            <option value="Ready for Pickup" ${order.status === 'Ready for Pickup' ? 'selected' : ''}>Ready for Pickup</option>
-                            <option value="Completed" ${order.status === 'Completed' ? 'selected' : ''}>Completed</option>
-                            <option value="Cancelled" ${order.status === 'Cancelled' ? 'selected' : ''}>Cancelled</option>
-                        </select>
-                    </span>
+                    <select onchange="updateOrderStatus(${order.id}, this.value)" 
+                            class="p-1 border rounded text-xs font-bold shadow-sm outline-none">
+                        <option value="Quote Pending" ${order.status === 'Quote Pending' ? 'selected' : ''}>Quote Pending</option>
+                        <option value="Deposit Paid" ${order.status === 'Deposit Paid' ? 'selected' : ''}>Deposit Paid</option>
+                        <option value="Baking Scheduled" ${order.status === 'Baking Scheduled' ? 'selected' : ''}>Baking Scheduled</option>
+                        <option value="Ready for Pickup" ${order.status === 'Ready for Pickup' ? 'selected' : ''}>Ready for Pickup</option>
+                        <option value="Completed" ${order.status === 'Completed' ? 'selected' : ''}>Completed (Pick Up)</option>
+                        <option value="Cancelled" ${order.status === 'Cancelled' ? 'selected' : ''}>Cancelled</option>
+                    </select>
                 </td>
             </tr>
         `).join('');
-    } catch (err) { console.error(err); }
+    } catch (err) { 
+        console.error("Order Fetch Error:", err); 
+    }
 }
 
 async function updateOrderStatus(orderId, newStatus) {
@@ -4409,9 +4705,21 @@ async function updateOrderStatus(orderId, newStatus) {
             headers: getHeaders(),
             body: JSON.stringify({ status: newStatus })
         });
+
         if (!res.ok) throw await res.json();
-        alert("Status updated!");
-        fetchOrders(); // Refresh the list
+        
+        // Show a brief confirmation
+        console.log(`Order #${orderId} updated to ${newStatus}`);
+        
+        // Refresh the pipeline. 
+        // If status was 'Completed' or 'Cancelled', it will now be hidden.
+        fetchOrders(); 
+        
+        // Also refresh the prep list in case a "Baking Scheduled" item was removed
+        if (typeof fetchPrepList === "function") {
+            fetchPrepList();
+        }
+
     } catch (err) {
         alert("Failed to update status: " + (err.detail || "Error"));
     }
@@ -4543,6 +4851,85 @@ async function deleteExpense(id) {
         console.error("Delete failed:", err);
     }
 }
+
+async function fetchPrepList() {
+    try {
+        const res = await fetch(`${API_URL}/production/prep-list`, { headers: getHeaders() });
+        
+        // Handle unauthorized session
+        if (res.status === 401) return logout();
+        
+        const list = await res.json();
+        const tbody = document.getElementById('prep-list-table-body');
+        
+        // Handle empty state (colspan updated to 7 to match new headers)
+        if (list.length === 0) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="7" class="p-8 text-center text-gray-400 font-medium italic">
+                        🎉 All prep targets met! No baking required at this time.
+                    </td>
+                </tr>`;
+            return;
+        }
+
+        // Render the rows with the new "On Hand" inventory data
+        tbody.innerHTML = list.map(item => `
+            <tr class="hover:bg-gray-50 transition border-b border-gray-100">
+                <td class="p-4 font-bold text-lg text-gray-800">${item.product_name}</td>
+                
+                <td class="p-4 text-center text-gray-400 font-bold bg-gray-50/50">${item.current_inventory}</td>
+                
+                <td class="p-4 text-center text-gray-500 font-medium">${item.retail_par_needed}</td>
+                <td class="p-4 text-center text-orange-500 font-bold">${item.custom_order_needed}</td>
+                <td class="p-4 text-center text-blue-600 font-bold">${item.planned_batch_needed}</td> 
+                
+                <td class="p-4 text-center text-indigo-600 font-black text-2xl">${item.total_to_bake}</td>
+                
+                <td class="p-4 text-right">
+                    <button onclick="showSection('products')" class="bg-indigo-50 text-indigo-600 border border-indigo-200 px-3 py-2 rounded text-xs font-bold hover:bg-indigo-600 hover:text-white transition shadow-sm">
+                        Go to Bake Screen
+                    </button>
+                </td>
+            </tr>
+        `).join('');
+        
+    } catch (err) { 
+        console.error("Failed to load prep list:", err); 
+    }
+}
+
+// Schedule a Manual Batch
+document.getElementById('schedule-batch-form')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    
+    const productId = document.getElementById('plan-prod-id').value;
+    const quantity = document.getElementById('plan-qty').value;
+    const rawDate = document.getElementById('plan-date').value;
+    
+    // Convert the date input (YYYY-MM-DD) into a valid ISO string for the backend
+    const isoDate = new Date(rawDate).toISOString();
+
+    try {
+        const res = await fetch(`${API_URL}/production/schedule-batch`, {
+            method: 'POST',
+            headers: getHeaders(),
+            body: JSON.stringify({
+                product_id: parseInt(productId),
+                planned_quantity: parseInt(quantity),
+                scheduled_date: isoDate
+            })
+        });
+
+        if (!res.ok) throw await res.json();
+        
+        alert("Batch scheduled successfully!");
+        e.target.reset();
+        fetchPrepList(); // Refresh the list to show the new math immediately
+    } catch (err) {
+        alert(err.detail || "Failed to schedule batch");
+    }
+});
 
 ##############################
 

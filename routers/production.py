@@ -110,69 +110,88 @@ def get_daily_prep_list(
 ):
     """
     Generates the morning prep list by calculating:
-    (Retail Par - Current Stock) + Custom Orders + Today's Planned Batches
+    (Retail Par + Custom Orders + Planned Batches) - Current Stock.
     """
     products = db.query(models.Product).all()
     today = datetime.utcnow().date()
     
-    # 1. Sum up existing baked stock sitting on the counter
+    # 1. Pull CURRENT stock from the counter (Finished Goods)
     current_stock = db.query(
         models.FinishedGoodsLot.product_id,
         func.sum(models.FinishedGoodsLot.quantity_remaining).label("qty")
     ).filter(
-        models.FinishedGoodsLot.is_depleted == False
+        models.FinishedGoodsLot.is_depleted == False,
+        models.FinishedGoodsLot.tenant_id == current_user.tenant_id
     ).group_by(models.FinishedGoodsLot.product_id).all()
-    stock_map = {item.product_id: item.qty for item in current_stock}
+    stock_map = {item.product_id: int(item.qty) for item in current_stock}
 
-    # 2. Sum up Custom Orders marked as "Baking Scheduled"
+    # 2. Pull Demand - CUSTOM ORDERS ONLY (Quote orders moved to schedule)
+    # Filters by orders marked as "Baking Scheduled" minus lead time [cite: 25, 53]
     custom_orders = db.query(
         models.CustomOrderItem.product_id,
         func.sum(models.CustomOrderItem.quantity).label("qty")
-    ).join(models.CustomOrder).filter(
-        models.CustomOrder.status == models.OrderStatus.BAKING_SCHEDULED
+    ).join(models.CustomOrder, models.CustomOrderItem.custom_order_id == models.CustomOrder.id)\
+     .join(models.Product, models.CustomOrderItem.product_id == models.Product.id)\
+     .filter(
+        models.CustomOrder.tenant_id == current_user.tenant_id,
+        models.CustomOrder.status == models.OrderStatus.BAKING_SCHEDULED,
+        (cast(models.CustomOrder.delivery_date, Date) - models.Product.lead_time_days) == today
     ).group_by(models.CustomOrderItem.product_id).all()
-    custom_map = {item.product_id: item.qty for item in custom_orders}
+    custom_map = {item.product_id: int(item.qty) for item in custom_orders}
 
-    # 3. Sum up Today's Planned Batches (NEW)
+    # 3. Pull Demand - PLANNED BATCHES ONLY (Manual entries)
+    # Filters manual bakes scheduled for today minus lead time [cite: 33]
     planned_batches = db.query(
         models.PlannedBatch.product_id,
         func.sum(models.PlannedBatch.planned_quantity).label("qty")
-    ).filter(
-        cast(models.PlannedBatch.scheduled_date, Date) == today,
+    ).join(models.Product, models.PlannedBatch.product_id == models.Product.id)\
+     .filter(
+        models.PlannedBatch.tenant_id == current_user.tenant_id,
+        (cast(models.PlannedBatch.scheduled_date, Date) - models.Product.lead_time_days) == today,
         models.PlannedBatch.is_completed == False
     ).group_by(models.PlannedBatch.product_id).all()
-    planned_map = {item.product_id: item.qty for item in planned_batches}
+    planned_map = {item.product_id: int(item.qty) for item in planned_batches}
 
-    # 4. Get Retail Par Levels
-    par_levels = db.query(models.ProductParLevel).all()
-    par_map = {par.product_id: par.target_quantity for par in par_levels}
+    # 4. Get Retail Par Levels 
+    par_map = {
+        par.product_id: int(par.target_quantity) 
+        for par in db.query(models.ProductParLevel).filter(
+            models.ProductParLevel.tenant_id == current_user.tenant_id
+        ).all()
+    }
 
-    # 5. Calculate the Prep List
     prep_list = []
     for product in products:
-        target_par = par_map.get(product.id, 0)
-        current_inventory = stock_map.get(product.id, 0)
+        on_hand = stock_map.get(product.id, 0)
+        par = par_map.get(product.id, 0)
+        custom = custom_map.get(product.id, 0)
+        planned = planned_map.get(product.id, 0)
         
-        # Retail deficit
-        retail_deficit = target_par - current_inventory
-        retail_needed = retail_deficit if retail_deficit > 0 else 0
+        # --- THE COUNTDOWN MATH ---
+        total_demand = par + custom + planned
+        net_to_bake = max(0, total_demand - on_hand)
         
-        # Add custom orders & planned batches
-        custom_needed = custom_map.get(product.id, 0)
-        planned_needed = planned_map.get(product.id, 0)
-        
-        # THE NEW MATH
-        total_to_bake = retail_needed + custom_needed + planned_needed
-        
-        if total_to_bake > 0:
+        if total_demand > 0:
+            # We show the RAW demand for Custom and Planned so the baker sees them,
+            # but we use the Waterfall to show the REMAINING retail par needed.
+            
+            # Use on_hand to satisfy Retail Par first
+            disp_retail = max(0, par - on_hand)
+            
+            # For Custom and Planned, we show the TOTAL needed for today 
+            # so they appear in their respective columns.
+            disp_custom = custom 
+            disp_planned = planned
+
             prep_list.append(
                 schemas.PrepListItem(
                     product_id=product.id,
                     product_name=product.name,
-                    retail_par_needed=retail_needed,
-                    custom_order_needed=custom_needed,
-                    planned_batch_needed=planned_needed, # Added to response
-                    total_to_bake=total_to_bake
+                    current_inventory=on_hand,
+                    retail_par_needed=disp_retail,
+                    custom_order_needed=disp_custom,
+                    planned_batch_needed=disp_planned,
+                    total_to_bake=net_to_bake 
                 )
             )
             

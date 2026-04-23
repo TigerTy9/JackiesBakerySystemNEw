@@ -80,6 +80,8 @@ class Product(Base):
     name = Column(String)
     retail_price = Column(Float)
     
+    lead_time_days = Column(Integer, default=0) 
+    
     tenant = relationship("Tenant", back_populates="products")
     recipe_items = relationship("RecipeItem", back_populates="product")
 

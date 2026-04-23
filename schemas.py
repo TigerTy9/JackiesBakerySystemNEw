@@ -19,6 +19,7 @@ class PlannedBatchCreate(BaseModel):
 class ProductCreate(BaseModel):
     name: str
     retail_price: float
+    lead_time_days: int = 0
     recipe: List[RecipeItemCreate]
 
 class SaleCreate(BaseModel):
@@ -141,12 +142,12 @@ class ProductResponse(BaseModel):
     tenant_id: int
     name: str
     retail_price: float
-    # Maps directly to the 'recipe_items' relationship in models.py
+    lead_time_days: int  # Added field
     recipe_items: List[RecipeItemResponse] = [] 
 
     class Config:
         from_attributes = True
-
+        
 class IngredientStockResponse(BaseModel):
     ingredient_id: int
     name: str
@@ -194,6 +195,7 @@ class PlannedBatchCreate(BaseModel):
 class PrepListItem(BaseModel):
     product_id: int
     product_name: str
+    current_inventory: int
     retail_par_needed: int
     custom_order_needed: int
     planned_batch_needed: int 

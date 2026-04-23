@@ -263,31 +263,51 @@ function addRecipeRow() {
 
 document.getElementById('add-product-form').addEventListener('submit', async (e) => {
     e.preventDefault();
+    
+    // 1. Capture basic product info and the new Lead Time value
     const name = document.getElementById('prod-name').value;
     const price = document.getElementById('prod-price').value;
+    const leadTime = document.getElementById('prod-lead-time').value; // New field for prep days
     
-    // Parse dynamic rows
+    // 2. Parse dynamic recipe rows (Bill of Materials)
     const recipe = [];
     document.querySelectorAll('.recipe-row').forEach(row => {
         const ingId = row.querySelector('.ing-id').value;
         const qty = row.querySelector('.ing-qty').value;
         if(ingId && qty) {
-            recipe.push({ ingredient_id: parseInt(ingId), quantity_required: parseFloat(qty) });
+            recipe.push({ 
+                ingredient_id: parseInt(ingId), 
+                quantity_required: parseFloat(qty) 
+            });
         }
     });
 
     try {
+        // 3. Send the data to the API including lead_time_days
         const res = await fetch(`${API_URL}/products/`, {
             method: 'POST',
-            headers: getHeaders(),
-            body: JSON.stringify({ name, retail_price: parseFloat(price), recipe })
+            headers: getHeaders(), 
+            body: JSON.stringify({ 
+                name, 
+                retail_price: parseFloat(price),
+                lead_time_days: parseInt(leadTime), // Added to match updated Pydantic schema
+                recipe 
+            })
         });
+
+        // 4. Handle response and UI reset
         if (!res.ok) throw await res.json();
+        
         alert("Product and Recipe saved!");
+        
+        // Reset form and dynamic recipe rows
         e.target.reset();
         document.getElementById('recipe-rows').innerHTML = '';
-        addRecipeRow();
+        addRecipeRow(); // Add back one empty starting row
+        
+        // Refresh the POS grid to show the new product
         fetchProducts();
+
     } catch (err) {
         alert(err.detail || "Failed to save product");
     }
@@ -462,33 +482,57 @@ document.getElementById('add-order-form').addEventListener('submit', async (e) =
     }
 });
 
-async function fetchOrders() {
+async function fetchOrders(view = 'active') {
+    // 1. Update Button UI Styles
+    const activeBtn = document.getElementById('btn-active-pipeline');
+    const historyBtn = document.getElementById('btn-order-history');
+
+    if (view === 'active') {
+        activeBtn.className = "bg-indigo-600 text-white px-4 py-2 rounded font-bold shadow-sm transition";
+        historyBtn.className = "bg-gray-200 text-gray-700 px-4 py-2 rounded font-bold hover:bg-gray-300 transition";
+    } else {
+        historyBtn.className = "bg-indigo-600 text-white px-4 py-2 rounded font-bold shadow-sm transition";
+        activeBtn.className = "bg-gray-200 text-gray-700 px-4 py-2 rounded font-bold hover:bg-gray-300 transition";
+    }
+
+    // 2. Fetch Data
+    // 'active' uses /orders/pipeline (hides completed)
+    // 'history' uses /orders/history (shows only completed/cancelled)
+    const endpoint = view === 'active' ? '/orders/pipeline' : '/orders/history';
+
     try {
-        const res = await fetch(`${API_URL}/orders/pipeline`, { headers: getHeaders() });
+        const res = await fetch(`${API_URL}${endpoint}`, { headers: getHeaders() });
         if (res.status === 401) return logout();
         const orders = await res.json();
         
         const tbody = document.getElementById('orders-table-body');
+        
+        if (orders.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="4" class="p-8 text-center text-gray-400 italic">No orders found in this view.</td></tr>`;
+            return;
+        }
+
         tbody.innerHTML = orders.map(order => `
-            <tr>
-                <td class="p-2 border-b font-medium">#${order.id}</td>
-                <td class="p-2 border-b">${order.customer_name}</td>
-                <td class="p-2 border-b">${new Date(order.delivery_date).toLocaleDateString()}</td>
+            <tr class="hover:bg-gray-50 transition border-b border-gray-100 ${order.status === 'Completed' ? 'opacity-60 bg-gray-50' : ''}">
+                <td class="p-2 border-b font-medium text-indigo-900">#${order.id}</td>
+                <td class="p-2 border-b font-bold">${order.customer_name}</td>
+                <td class="p-2 border-b text-gray-500">${new Date(order.delivery_date).toLocaleDateString()}</td>
                 <td class="p-2 border-b">
-                    <span class="px-2 py-1 bg-yellow-100 text-yellow-800 text-xs rounded-full font-bold">
-                        <select onchange="updateOrderStatus(${order.id}, this.value)" class="p-1 border rounded text-xs font-bold">
-                            <option value="Quote Pending" ${order.status === 'Quote Pending' ? 'selected' : ''}>Quote Pending</option>
-                            <option value="Deposit Paid" ${order.status === 'Deposit Paid' ? 'selected' : ''}>Deposit Paid</option>
-                            <option value="Baking Scheduled" ${order.status === 'Baking Scheduled' ? 'selected' : ''}>Baking Scheduled</option>
-                            <option value="Ready for Pickup" ${order.status === 'Ready for Pickup' ? 'selected' : ''}>Ready for Pickup</option>
-                            <option value="Completed" ${order.status === 'Completed' ? 'selected' : ''}>Completed</option>
-                            <option value="Cancelled" ${order.status === 'Cancelled' ? 'selected' : ''}>Cancelled</option>
-                        </select>
-                    </span>
+                    <select onchange="updateOrderStatus(${order.id}, this.value)" 
+                            class="p-1 border rounded text-xs font-bold shadow-sm outline-none">
+                        <option value="Quote Pending" ${order.status === 'Quote Pending' ? 'selected' : ''}>Quote Pending</option>
+                        <option value="Deposit Paid" ${order.status === 'Deposit Paid' ? 'selected' : ''}>Deposit Paid</option>
+                        <option value="Baking Scheduled" ${order.status === 'Baking Scheduled' ? 'selected' : ''}>Baking Scheduled</option>
+                        <option value="Ready for Pickup" ${order.status === 'Ready for Pickup' ? 'selected' : ''}>Ready for Pickup</option>
+                        <option value="Completed" ${order.status === 'Completed' ? 'selected' : ''}>Completed (Pick Up)</option>
+                        <option value="Cancelled" ${order.status === 'Cancelled' ? 'selected' : ''}>Cancelled</option>
+                    </select>
                 </td>
             </tr>
         `).join('');
-    } catch (err) { console.error(err); }
+    } catch (err) { 
+        console.error("Order Fetch Error:", err); 
+    }
 }
 
 async function updateOrderStatus(orderId, newStatus) {
@@ -498,9 +542,21 @@ async function updateOrderStatus(orderId, newStatus) {
             headers: getHeaders(),
             body: JSON.stringify({ status: newStatus })
         });
+
         if (!res.ok) throw await res.json();
-        alert("Status updated!");
-        fetchOrders(); // Refresh the list
+        
+        // Show a brief confirmation
+        console.log(`Order #${orderId} updated to ${newStatus}`);
+        
+        // Refresh the pipeline. 
+        // If status was 'Completed' or 'Cancelled', it will now be hidden.
+        fetchOrders(); 
+        
+        // Also refresh the prep list in case a "Baking Scheduled" item was removed
+        if (typeof fetchPrepList === "function") {
+            fetchPrepList();
+        }
+
     } catch (err) {
         alert("Failed to update status: " + (err.detail || "Error"));
     }
@@ -636,29 +692,37 @@ async function deleteExpense(id) {
 async function fetchPrepList() {
     try {
         const res = await fetch(`${API_URL}/production/prep-list`, { headers: getHeaders() });
+        
+        // Handle unauthorized session
         if (res.status === 401) return logout();
         
         const list = await res.json();
         const tbody = document.getElementById('prep-list-table-body');
         
-        // Handle empty state (everything is baked!)
+        // Handle empty state (colspan updated to 7 to match new headers)
         if (list.length === 0) {
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="6" class="p-8 text-center text-gray-400 font-medium italic">
+                    <td colspan="7" class="p-8 text-center text-gray-400 font-medium italic">
                         🎉 All prep targets met! No baking required at this time.
                     </td>
                 </tr>`;
             return;
         }
 
-        // Render the rows
+        // Render the rows with the new "On Hand" inventory data
         tbody.innerHTML = list.map(item => `
-            <tr class="hover:bg-gray-50 transition">
+            <tr class="hover:bg-gray-50 transition border-b border-gray-100">
                 <td class="p-4 font-bold text-lg text-gray-800">${item.product_name}</td>
+                
+                <td class="p-4 text-center text-gray-400 font-bold bg-gray-50/50">${item.current_inventory}</td>
+                
                 <td class="p-4 text-center text-gray-500 font-medium">${item.retail_par_needed}</td>
                 <td class="p-4 text-center text-orange-500 font-bold">${item.custom_order_needed}</td>
-                <td class="p-4 text-center text-blue-600 font-bold">${item.planned_batch_needed}</td> <td class="p-4 text-center text-indigo-600 font-black text-2xl">${item.total_to_bake}</td>
+                <td class="p-4 text-center text-blue-600 font-bold">${item.planned_batch_needed}</td> 
+                
+                <td class="p-4 text-center text-indigo-600 font-black text-2xl">${item.total_to_bake}</td>
+                
                 <td class="p-4 text-right">
                     <button onclick="showSection('products')" class="bg-indigo-50 text-indigo-600 border border-indigo-200 px-3 py-2 rounded text-xs font-bold hover:bg-indigo-600 hover:text-white transition shadow-sm">
                         Go to Bake Screen
