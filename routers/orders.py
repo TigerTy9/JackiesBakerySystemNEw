@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from typing import List
 import database, models, schemas
 from auth import get_current_user, get_tenant_db
+import crud
 
 router = APIRouter(prefix="/orders", tags=["Custom Orders"])
 
@@ -42,7 +43,8 @@ def create_custom_order(
 def update_order_pipeline(
     order_id: int, 
     update_data: schemas.CustomOrderUpdate,
-    db: Session = Depends(get_tenant_db)
+    db: Session = Depends(get_tenant_db),
+    current_user: models.User = Depends(get_current_user)
 ):
     # RLS ensures they can only update their own bakery's orders
     order = db.query(models.CustomOrder).filter(models.CustomOrder.id == order_id).first()
@@ -50,6 +52,19 @@ def update_order_pipeline(
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
         
+    # --- SMART STATE MACHINE ---
+    old_status = order.status
+    new_status = update_data.status if update_data.status else old_status
+    
+    fulfilled_states = [models.OrderStatus.READY, models.OrderStatus.COMPLETED]
+    
+    # Moving FORWARD into a fulfilled state
+    needs_deduction = (old_status not in fulfilled_states) and (new_status in fulfilled_states)
+    
+    # Moving BACKWARD out of a fulfilled state (e.g., Accidentally clicked Ready, reverting to Baking Scheduled)
+    needs_restoration = (old_status in fulfilled_states) and (new_status not in fulfilled_states)
+            
+    # Apply standard text updates
     if update_data.total_price is not None:
         order.total_price = update_data.total_price
     if update_data.deposit_amount is not None:
@@ -57,6 +72,32 @@ def update_order_pipeline(
     if update_data.status is not None:
         order.status = update_data.status
         
+    # --- PROCESS THE INVENTORY DEDUCTION ---
+    if needs_deduction:
+        for item in order.items:
+            item_revenue = (item.price_override * item.quantity) if item.price_override is not None else None
+            try:
+                crud.record_finished_goods_sale(
+                    db=db, product_id=item.product_id, tenant_id=current_user.tenant_id,
+                    quantity_sold=item.quantity, custom_revenue=item_revenue
+                )
+            except Exception as e:
+                db.rollback()
+                raise HTTPException(status_code=400, detail=f"Cannot fulfill order. {str(e)}")
+
+    # --- PROCESS THE INVENTORY RESTORATION (UNDO) ---
+    if needs_restoration:
+        for item in order.items:
+            item_revenue = (item.price_override * item.quantity) if item.price_override is not None else None
+            try:
+                crud.restore_finished_goods_inventory(
+                    db=db, product_id=item.product_id, tenant_id=current_user.tenant_id,
+                    quantity_to_restore=item.quantity, custom_revenue=item_revenue
+                )
+            except Exception as e:
+                db.rollback()
+                raise HTTPException(status_code=400, detail=f"Cannot restore stock. {str(e)}")
+
     db.commit()
     db.refresh(order)
     return order

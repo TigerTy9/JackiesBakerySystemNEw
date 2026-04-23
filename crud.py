@@ -109,7 +109,7 @@ def execute_production_run(
     return new_batch
 
 
-def record_finished_goods_sale(db: Session, product_id: int, tenant_id: int, quantity_sold: int):
+def record_finished_goods_sale(db: Session, product_id: int, tenant_id: int, quantity_sold: int, custom_revenue: float = None):
     """
     2. THE SALE: Deducts from baked inventory and logs the final financial transaction.
     """
@@ -144,7 +144,9 @@ def record_finished_goods_sale(db: Session, product_id: int, tenant_id: int, qua
         db.flush()
 
     # Calculate final margins and log the sale 
-    total_revenue = product.retail_price * quantity_sold
+    # UPDATED: Use custom_revenue if provided, otherwise fallback to retail price
+    total_revenue = custom_revenue if custom_revenue is not None else (product.retail_price * quantity_sold)
+    
     margin_fifo = total_revenue - total_fifo_cost
     margin_newest = total_revenue - total_newest_cost
     
@@ -218,3 +220,35 @@ def record_finished_goods_waste(db: Session, lot_id: int, tenant_id: int, quanti
     db.add(waste_entry)
     db.commit()
     return waste_entry
+
+def restore_finished_goods_inventory(db: Session, product_id: int, tenant_id: int, quantity_to_restore: int, custom_revenue: float = None):
+    """
+    REVERSES A SALE: Adds baked goods back to the counter and removes the transaction log.
+    """
+    # 1. Add inventory back to the most recently created lot for this product
+    latest_batch = db.query(models.FinishedGoodsLot)\
+        .filter(models.FinishedGoodsLot.product_id == product_id,
+                models.FinishedGoodsLot.tenant_id == tenant_id)\
+        .order_by(models.FinishedGoodsLot.production_date.desc()).first()
+
+    if latest_batch:
+        latest_batch.quantity_remaining += quantity_to_restore
+        latest_batch.is_depleted = False
+    else:
+        raise Exception("Cannot restore inventory: No production batch exists for this product.")
+
+    # 2. Remove the transaction log to fix the financial ledger
+    product = db.query(models.Product).filter(models.Product.id == product_id).first()
+    expected_revenue = custom_revenue if custom_revenue is not None else (product.retail_price * quantity_to_restore)
+
+    # Find the most recent transaction matching this exact sale
+    recent_tx = db.query(models.TransactionLog)\
+        .filter(models.TransactionLog.product_id == product_id,
+                models.TransactionLog.tenant_id == tenant_id,
+                models.TransactionLog.sale_price == expected_revenue)\
+        .order_by(models.TransactionLog.timestamp.desc()).first()
+        
+    if recent_tx:
+        db.delete(recent_tx)
+        
+    db.flush()

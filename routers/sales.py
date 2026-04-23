@@ -14,12 +14,12 @@ def record_sale(
     db: Session = Depends(get_tenant_db) 
 ):
     try:
-        # This now subtracts from Finished Goods instead of raw ingredients
         result = crud.record_finished_goods_sale(
             db=db, 
             product_id=sale.item_id, 
             tenant_id=current_user.tenant_id,
-            quantity_sold=sale.quantity 
+            quantity_sold=sale.quantity,
+            custom_revenue=(sale.price * sale.quantity) # Now respects the price sent from the frontend!
         )
         return result
     except Exception as e:
