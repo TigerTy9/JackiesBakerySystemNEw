@@ -3,44 +3,66 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BakeryOS - Tenant Panel</title>
+    <title>BakeryOS | Knead.name</title>
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-gray-50 text-gray-800 font-sans h-screen flex">
 
-    <div id="login-view" class="flex flex-col items-center justify-center w-full h-full">
-        <div class="bg-white p-8 rounded-lg shadow-md w-96">
-            <h1 class="text-3xl font-bold mb-6 text-center text-indigo-600">BakeryOS</h1>
-            <form id="login-form" class="space-y-4">
+    <div id="login-view" class="flex flex-col items-center justify-center w-full h-full bg-slate-50">
+        <div class="bg-white p-10 rounded-2xl shadow-xl w-full max-w-md border border-slate-100">
+            
+            <div class="text-center mb-10">
+                <h1 class="text-5xl font-black tracking-tight text-indigo-600 mb-2">
+                    knead<span class="text-indigo-400">.name</span>
+                </h1>
+                <div class="h-1 w-12 bg-indigo-600 mx-auto rounded-full mb-4"></div>
+                <p class="text-slate-500 font-medium leading-tight">
+                    We needed a name.<br>
+                    <span class="text-slate-400">You needed something for your bakery.</span>
+                </p>
+            </div>
+
+            <form id="login-form" class="space-y-5">
                 <div>
-                    <label class="block text-sm font-medium">Username</label>
-                    <input type="text" id="username" class="w-full mt-1 p-2 border rounded" required>
+                    <label class="block text-xs font-bold uppercase tracking-widest text-slate-400 mb-1 ml-1">Username</label>
+                    <input type="text" id="username" class="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:bg-white outline-none transition-all" required>
                 </div>
                 <div>
-                    <label class="block text-sm font-medium">Password</label>
-                    <input type="password" id="password" class="w-full mt-1 p-2 border rounded" required>
+                    <label class="block text-xs font-bold uppercase tracking-widest text-slate-400 mb-1 ml-1">Password</label>
+                    <input type="password" id="password" class="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:bg-white outline-none transition-all" required>
                 </div>
-                <button type="submit" class="w-full bg-indigo-600 text-white p-2 rounded hover:bg-indigo-700 font-bold">Sign In</button>
-                <p id="login-error" class="text-red-500 text-sm hidden"></p>
+                <button type="submit" class="w-full bg-indigo-600 text-white p-4 rounded-xl hover:bg-indigo-700 font-bold shadow-lg shadow-indigo-100 transition-all active:scale-[0.98]">
+                    Open the Bakery
+                </button>
+                <p id="login-error" class="text-red-500 text-sm text-center font-medium hidden"></p>
             </form>
+
+            <div class="mt-8 pt-6 border-t border-slate-50 text-center">
+                <p class="text-[10px] text-slate-300 uppercase tracking-widest font-bold italic">FLOURish SaaS v1.0</p>
+            </div>
         </div>
     </div>
 
-    <div id="dashboard-view" class="hidden w-full h-full flex">
+<div id="dashboard-view" class="hidden w-full h-full flex">
         
         <aside class="w-64 bg-indigo-900 text-white flex flex-col shrink-0">
             <div class="p-6 border-b border-indigo-800">
-                <h2 id="bakery-name-display" class="text-xl font-bold break-words">BakeryOS</h2>
-                <p id="user-role-display" class="text-xs text-indigo-300 mt-1"></p>
+                <h2 class="text-2xl font-black tracking-tighter">
+                    FLOUR<span class="text-indigo-400 font-medium">ish</span>
+                </h2>
+                
+                <p id="tenant-name-display" class="text-sm font-bold text-white mt-2 break-words opacity-90"></p>
+                
+                <p id="user-role-display" class="text-[10px] text-indigo-300 mt-1 uppercase tracking-widest font-bold"></p>
             </div>
             <nav class="flex-1 p-4 space-y-2">
                 <button onclick="showSection('inventory')" class="w-full text-left p-2 hover:bg-indigo-800 rounded">📦 Inventory</button>
                 <button onclick="showSection('products')" class="w-full text-left p-2 hover:bg-indigo-800 rounded">🥐 Products & POS</button>
                 <button onclick="showSection('orders')" class="w-full text-left p-2 hover:bg-indigo-800 rounded">📋 Custom Orders</button>
                 <button onclick="showSection('finances')" class="w-full text-left p-2 hover:bg-indigo-800 rounded">💰 Finances</button>
-                <button onclick="showSection('transactions')" class="w-full text-left p-2 hover:bg-indigo-800 rounded">📖 Ledger</button>
+                <button onclick="showSection('transactions')" class="text-left p-2 hover:bg-indigo-800 rounded">📖 Ledger</button>
             </nav>
-            <button onclick="logout()" class="p-4 bg-indigo-950 hover:bg-red-600 text-left font-bold">🚪 Logout</button>
+            <button onclick="logout()" class="p-4 bg-indigo-950 hover:bg-red-600 text-left font-bold transition-colors">🚪 Logout</button>
         </aside>
 
         <main class="flex-1 p-8 overflow-y-auto">

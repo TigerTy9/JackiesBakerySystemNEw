@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>knead.name | BakeryOS</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .gradient-text {
+            background: linear-gradient(to right, #4f46e5, #9333ea);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-900 font-sans">
+
+    <div id="landing-view" class="w-full">
+        <nav class="flex justify-between items-center p-6 max-w-7xl mx-auto">
+            <div class="text-2xl font-black text-indigo-600">knead.name</div>
+            <button onclick="toggleLogin(true)" class="bg-indigo-600 text-white px-6 py-2 rounded-full font-bold hover:bg-indigo-700 transition">
+                Sign In
+            </button>
+        </nav>
+
+        <header class="max-w-7xl mx-auto px-6 py-20 text-center">
+            <h1 class="text-6xl md:text-7xl font-black mb-6 tracking-tight">
+                We needed a <span class="gradient-text">name.</span><br>
+                You needed a <span class="text-indigo-600">bakery.</span>
+            </h1>
+            <p class="text-xl text-slate-600 mb-10 max-w-2xl mx-auto leading-relaxed">
+                The specialized SaaS for artisan bakers. Manage multi-tenant inventory, 
+                calculate FIFO margins, and automate production runs without the headache.
+            </p>
+            <div class="flex justify-center gap-4">
+                <button onclick="toggleLogin(true)" class="bg-slate-900 text-white px-10 py-4 rounded-xl font-bold text-lg hover:shadow-xl transition">
+                    Get Started
+                </button>
+                <a href="#features" class="bg-white border border-slate-200 px-10 py-4 rounded-xl font-bold text-lg hover:bg-slate-50 transition">
+                    View Features
+                </a>
+            </div>
+        </header>
+
+        <section id="features" class="max-w-7xl mx-auto px-6 py-24 grid md:grid-cols-3 gap-12">
+            <div class="p-8 bg-white rounded-2xl shadow-sm border border-slate-100">
+                <div class="text-4xl mb-4">⚖️</div>
+                <h3 class="text-xl font-bold mb-2">FIFO Inventory</h3>
+                <p class="text-slate-500">Track ingredient lots precisely. Know exactly what that bag of flour cost you today
+            </div>
+            <div class="p-8 bg-white rounded-2xl shadow-sm border border-slate-100">
+                <div class="text-4xl mb-4">👨‍🍳</div>
+                <h3 class="text-xl font-bold mb-2">Production Logic</h3>
+                <p class="text-slate-500">Separate baking from selling. Deduct raw stock at 4 AM, sell finished goods all day.</p>
+            </div>
+            <div class="p-8 bg-white rounded-2xl shadow-sm border border-slate-100">
+                <div class="text-4xl mb-4">🛡️</div>
+                <h3 class="text-xl font-bold mb-2">Cyber-Secure</h3>
+                <p class="text-slate-500">Built with Row-Level Security. Your recipes and margins are for your eyes only.</p>
+            </div>
+        </section>
+
+        <section class="bg-indigo-600 py-16 text-white text-center">
+            <p class="uppercase tracking-widest text-sm font-bold opacity-80 mb-4">Trusted By</p>
+            <h2 class="text-3xl font-bold italic">"Baked with Love by Jackie"</h2>
+            <p class="mt-4 opacity-90 max-w-lg mx-auto">Empowering independent bakers with professional-grade financial tracking and inventory management.</p>
+        </section>
+    </div>
+
+    <div id="login-view" class="hidden fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-6">
+        <div class="bg-white p-8 rounded-2xl shadow-2xl w-full max-w-md relative">
+            <button onclick="toggleLogin(false)" class="absolute top-4 right-4 text-slate-400 hover:text-slate-600">✕</button>
+            <h1 class="text-3xl font-bold mb-6 text-center text-indigo-600">BakeryOS</h1>
+            <form id="login-form" class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium mb-1">Username</label>
+                    <input type="text" id="username" class="w-full p-3 border rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none" required>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1">Password</label>
+                    <input type="password" id="password" class="w-full p-3 border rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none" required>
+                </div>
+                <button type="submit" class="w-full bg-indigo-600 text-white p-3 rounded-xl hover:bg-indigo-700 font-bold shadow-lg transition">Sign In</button>
+                <p id="login-error" class="text-red-500 text-sm text-center hidden"></p>
+            </form>
+        </div>
+    </div>
+
+    <div id="dashboard-view" class="hidden w-full h-screen flex">
+        </div>
+
+    <script>
+        // Toggle logic for the new landing page
+        function toggleLogin(show) {
+            const loginView = document.getElementById('login-view');
+            if (show) {
+                loginView.classList.remove('hidden');
+            } else {
+                loginView.classList.add('hidden');
+            }
+        }
+
+        // Add this to your showDashboard function in app.js
+        function showDashboard() {
+            document.getElementById('landing-view').classList.add('hidden');
+            document.getElementById('login-view').classList.add('hidden');
+            document.getElementById('dashboard-view').classList.remove('hidden');
+            // ... rest of your logic
+        }
+    </script>
+    <script src="app.js"></script>
+</body>
+</html>

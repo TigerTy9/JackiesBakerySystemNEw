@@ -6,6 +6,7 @@ JackiesBakerySystemNEw/
     .env
     database.py
     models.py
+    extra.html
     RLS
     passwords.txt
     need to do
@@ -27,9 +28,21 @@ JackiesBakerySystemNEw/
         admin.py
         inventory.py
     frontend/
+        favicon-32x32.png
+        homepage copy.html
+        site.webmanifest
+        favicon-16x16.png
+        android-chrome-512x512.png
+        Logo.png
+        homepage.html
+        LogoUncompressed.png
+        homepage copy 2.html
+        android-chrome-192x192.png
         index.html
+        favicon.ico
         app.js
         admin.html
+        apple-touch-icon.png
 
 ==================================================
 FILE CONTENTS:
@@ -461,6 +474,62 @@ class LaborLog(Base):
     hours_spent = Column(Float)
     hourly_rate = Column(Float) # The wage of the baker for this specific batch
     total_labor_cost = Column(Float) # Calculated as hours * rate
+
+##############################
+
+
+FILE: extra.html
+----------------
+<section id="pricing" class="max-w-7xl mx-auto px-6 py-24 border-t border-slate-200">
+    <div class="text-center mb-16">
+        <h2 class="text-4xl font-black mb-4">Pricing that grows with your dough.</h2>
+        <p class="text-slate-500">Lock in your Legacy Rate today and never pay full price.</p>
+    </div>
+
+    <div class="grid md:grid-cols-3 gap-8">
+        <div class="p-8 bg-white rounded-3xl border border-slate-100 shadow-sm hover:shadow-md transition">
+            <h3 class="text-xl font-bold mb-2">Boutique</h3>
+            <p class="text-slate-500 text-sm mb-6">For the cottage baker perfecting their craft.</p>
+            <div class="mb-6">
+                <span class="text-4xl font-black">$19.99</span><span class="text-slate-400">/mo</span>
+            </div>
+            <ul class="space-y-3 text-sm text-slate-600 mb-8">
+                <li>✓ Full FIFO Engine</li>
+                <li>✓ Batch Transformation</li>
+                <li>✓ Single User</li>
+            </ul>
+        </div>
+
+        <div class="p-8 bg-white rounded-3xl border-2 border-indigo-600 shadow-xl relative scale-105 z-10">
+            <div class="absolute -top-4 left-1/2 -translate-x-1/2 bg-indigo-600 text-white text-[10px] font-black px-4 py-1 rounded-full uppercase tracking-widest">Most Popular</div>
+            <h3 class="text-xl font-bold mb-2">Artisan</h3>
+            <p class="text-slate-500 text-sm mb-6">For established shops scaling their production.</p>
+            <div class="mb-6">
+                <span class="text-4xl font-black">$49.99</span><span class="text-slate-400">/mo</span>
+            </div>
+            <ul class="space-y-3 text-sm text-slate-600 mb-8">
+                <li>✓ Everything in Boutique</li>
+                <li>✓ Up to 5 Staff Users</li>
+                <li>✓ Waste & Margin Analytics</li>
+                <li>✓ Custom Order Pipeline</li>
+            </ul>
+        </div>
+
+        <div class="p-8 bg-white rounded-3xl border border-slate-100 shadow-sm hover:shadow-md transition">
+            <h3 class="text-xl font-bold mb-2">Enterprise</h3>
+            <p class="text-slate-500 text-sm mb-6">For wholesale and multi-location operations.</p>
+            <div class="mb-6">
+                <span class="text-4xl font-black">$99.99</span><span class="text-slate-400">/mo</span>
+            </div>
+            <ul class="space-y-3 text-sm text-slate-600 mb-8">
+                <li>✓ Everything in Artisan</li>
+                <li>✓ Unlimited Users</li>
+                <li>✓ Advanced Security Auditing</li>
+                <li>✓ Wholesale Logistics</li>
+            </ul>
+        </div>
+    </div>
+</section>
 
 ##############################
 
@@ -1438,6 +1507,7 @@ def list_products_and_recipes(db: Session = Depends(get_tenant_db)):
 
 FILE: routers/tenants.py
 ------------------------
+import re
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 import database, models, schemas
@@ -1445,16 +1515,44 @@ from auth import hash_password
 
 router = APIRouter(prefix="/tenants", tags=["tenants"])
 
+def slugify_domain(name: str) -> str:
+    """
+    Converts a business name into a DNS-safe subdomain.
+    Example: "Jackie's Bakery!" -> "jackies-bakery"
+    """
+    # 1. Lowercase and strip whitespace
+    name = name.lower().strip()
+    # 2. Replace spaces with hyphens
+    name = name.replace(' ', '-')
+    # 3. Remove any character that isn't a-z, 0-9, or a hyphen
+    name = re.sub(r'[^a-z0-9-]', '', name)
+    # 4. Remove duplicate hyphens (e.g. "Bakery -- Shop" -> "bakery-shop")
+    name = re.sub(r'-+', '-', name)
+    # 5. Trim hyphens from the start/end
+    return name.strip('-')
+
 @router.post("/", response_model=schemas.TenantResponse)
 def create_tenant(tenant: schemas.TenantCreate, db: Session = Depends(database.get_db)):
-    # 1. Map Schema 'name' to Model 'business_name'
-    # 2. Generate a basic domain from the name
-    generated_domain = f"{tenant.name.lower().replace(' ', '-')}.bakeryos.com"
+    # Generate the clean, safe subdomain
+    subdomain = slugify_domain(tenant.name)
     
+    if not subdomain:
+        raise HTTPException(status_code=400, detail="Business name must contain alphanumeric characters.")
+
+    full_domain = f"{subdomain}.flourish.name"
+
+    # Check for domain collisions (uniqueness check)
+    existing_domain = db.query(models.Tenant).filter(models.Tenant.domain == full_domain).first()
+    if existing_domain:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"The domain '{full_domain}' is already taken. Please try a different business name."
+        )
+
     db_tenant = models.Tenant(
         business_name=tenant.name,
         email=tenant.email,
-        domain=generated_domain
+        domain=full_domain
     )
     
     try:
@@ -1464,17 +1562,14 @@ def create_tenant(tenant: schemas.TenantCreate, db: Session = Depends(database.g
         return db_tenant
     except Exception as e:
         db.rollback()
-        # This catches things like duplicate names/emails
-        raise HTTPException(status_code=400, detail=f"Database error: {str(e)}")
+        raise HTTPException(status_code=400, detail="Could not create tenant. Name or Email may already exist.")
 
 @router.post("/register-user", response_model=schemas.UserResponse)
 def register_user(user_in: schemas.UserCreate, db: Session = Depends(database.get_db)):
-    # 1. Check if user already exists
     existing_user = db.query(models.User).filter(models.User.username == user_in.username).first()
     if existing_user:
         raise HTTPException(status_code=400, detail="Username already registered")
     
-    # 2. Hash the password before saving 
     hashed_pwd = hash_password(user_in.password)
     
     new_user = models.User(
@@ -1487,6 +1582,8 @@ def register_user(user_in: schemas.UserCreate, db: Session = Depends(database.ge
     db.commit()
     db.refresh(new_user)
     return new_user
+
+
 
 ##############################
 
@@ -1939,6 +2036,1551 @@ def get_stock_levels(db: Session = Depends(get_tenant_db)):
 ##############################
 
 
+FILE: frontend/favicon-32x32.png
+--------------------------------
+[Error reading file: 'utf-8' codec can't decode byte 0x89 in position 0: invalid start byte]
+
+##############################
+
+
+FILE: frontend/homepage copy.html
+---------------------------------
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>knead.name | BakeryOS</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .gradient-text {
+            background: linear-gradient(to right, #4f46e5, #9333ea);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-900 font-sans">
+
+    <div id="landing-view" class="w-full">
+        <nav class="flex justify-between items-center p-6 max-w-7xl mx-auto">
+            <div class="text-2xl font-black text-indigo-600">knead.name</div>
+            <button onclick="toggleLogin(true)" class="bg-indigo-600 text-white px-6 py-2 rounded-full font-bold hover:bg-indigo-700 transition">
+                Sign In
+            </button>
+        </nav>
+
+        <header class="max-w-7xl mx-auto px-6 py-20 text-center">
+            <h1 class="text-6xl md:text-7xl font-black mb-6 tracking-tight">
+                We needed a <span class="gradient-text">name.</span><br>
+                You needed a <span class="text-indigo-600">bakery.</span>
+            </h1>
+            <p class="text-xl text-slate-600 mb-10 max-w-2xl mx-auto leading-relaxed">
+                The specialized SaaS for artisan bakers. Manage multi-tenant inventory, 
+                calculate FIFO margins, and automate production runs without the headache.
+            </p>
+            <div class="flex justify-center gap-4">
+                <button onclick="toggleLogin(true)" class="bg-slate-900 text-white px-10 py-4 rounded-xl font-bold text-lg hover:shadow-xl transition">
+                    Get Started
+                </button>
+                <a href="#features" class="bg-white border border-slate-200 px-10 py-4 rounded-xl font-bold text-lg hover:bg-slate-50 transition">
+                    View Features
+                </a>
+            </div>
+        </header>
+
+        <section id="features" class="max-w-7xl mx-auto px-6 py-24 grid md:grid-cols-3 gap-12">
+            <div class="p-8 bg-white rounded-2xl shadow-sm border border-slate-100">
+                <div class="text-4xl mb-4">⚖️</div>
+                <h3 class="text-xl font-bold mb-2">FIFO Inventory</h3>
+                <p class="text-slate-500">Track ingredient lots precisely. Know exactly what that bag of flour cost you today
+            </div>
+            <div class="p-8 bg-white rounded-2xl shadow-sm border border-slate-100">
+                <div class="text-4xl mb-4">👨‍🍳</div>
+                <h3 class="text-xl font-bold mb-2">Production Logic</h3>
+                <p class="text-slate-500">Separate baking from selling. Deduct raw stock at 4 AM, sell finished goods all day.</p>
+            </div>
+            <div class="p-8 bg-white rounded-2xl shadow-sm border border-slate-100">
+                <div class="text-4xl mb-4">🛡️</div>
+                <h3 class="text-xl font-bold mb-2">Cyber-Secure</h3>
+                <p class="text-slate-500">Built with Row-Level Security. Your recipes and margins are for your eyes only.</p>
+            </div>
+        </section>
+
+        <section class="bg-indigo-600 py-16 text-white text-center">
+            <p class="uppercase tracking-widest text-sm font-bold opacity-80 mb-4">Trusted By</p>
+            <h2 class="text-3xl font-bold italic">"Baked with Love by Jackie"</h2>
+            <p class="mt-4 opacity-90 max-w-lg mx-auto">Empowering independent bakers with professional-grade financial tracking and inventory management.</p>
+        </section>
+    </div>
+
+    <div id="login-view" class="hidden fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-6">
+        <div class="bg-white p-8 rounded-2xl shadow-2xl w-full max-w-md relative">
+            <button onclick="toggleLogin(false)" class="absolute top-4 right-4 text-slate-400 hover:text-slate-600">✕</button>
+            <h1 class="text-3xl font-bold mb-6 text-center text-indigo-600">BakeryOS</h1>
+            <form id="login-form" class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium mb-1">Username</label>
+                    <input type="text" id="username" class="w-full p-3 border rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none" required>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1">Password</label>
+                    <input type="password" id="password" class="w-full p-3 border rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none" required>
+                </div>
+                <button type="submit" class="w-full bg-indigo-600 text-white p-3 rounded-xl hover:bg-indigo-700 font-bold shadow-lg transition">Sign In</button>
+                <p id="login-error" class="text-red-500 text-sm text-center hidden"></p>
+            </form>
+        </div>
+    </div>
+
+    <div id="dashboard-view" class="hidden w-full h-screen flex">
+        </div>
+
+    <script>
+        // Toggle logic for the new landing page
+        function toggleLogin(show) {
+            const loginView = document.getElementById('login-view');
+            if (show) {
+                loginView.classList.remove('hidden');
+            } else {
+                loginView.classList.add('hidden');
+            }
+        }
+
+        // Add this to your showDashboard function in app.js
+        function showDashboard() {
+            document.getElementById('landing-view').classList.add('hidden');
+            document.getElementById('login-view').classList.add('hidden');
+            document.getElementById('dashboard-view').classList.remove('hidden');
+            // ... rest of your logic
+        }
+    </script>
+    <script src="app.js"></script>
+</body>
+</html>
+
+##############################
+
+
+FILE: frontend/site.webmanifest
+-------------------------------
+{"name":"","short_name":"","icons":[{"src":"/android-chrome-192x192.png","sizes":"192x192","type":"image/png"},{"src":"/android-chrome-512x512.png","sizes":"512x512","type":"image/png"}],"theme_color":"#ffffff","background_color":"#ffffff","display":"standalone"}
+
+##############################
+
+
+FILE: frontend/favicon-16x16.png
+--------------------------------
+[Error reading file: 'utf-8' codec can't decode byte 0x89 in position 0: invalid start byte]
+
+##############################
+
+
+FILE: frontend/android-chrome-512x512.png
+-----------------------------------------
+[Error reading file: 'utf-8' codec can't decode byte 0x89 in position 0: invalid start byte]
+
+##############################
+
+
+FILE: frontend/Logo.png
+-----------------------
+[Error reading file: 'utf-8' codec can't decode byte 0x89 in position 0: invalid start byte]
+
+##############################
+
+
+FILE: frontend/homepage.html
+----------------------------
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FLOURish™ | The Artisan Operating System</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&display=swap');
+
+        :root {
+            --slate-50: #f8fafc;
+            --slate-100: #f1f5f9;
+            --slate-200: #e2e8f0;
+            --slate-300: #cbd5e1;
+            --slate-400: #94a3b8;
+            --slate-500: #64748b;
+            --slate-600: #475569;
+            --slate-700: #334155;
+            --slate-800: #1e293b;
+            --slate-900: #0f172a;
+            --slate-950: #020617;
+            
+            --indigo-50: #eef2ff;
+            --indigo-100: #e0e7ff;
+            --indigo-200: #c7d2fe;
+            --indigo-300: #a5b4fc;
+            --indigo-400: #818cf8;
+            --indigo-500: #6366f1;
+            --indigo-600: #4f46e5;
+            --indigo-700: #4338ca;
+            
+            --green-50: #f0fdf4;
+            --green-500: #22c55e;
+            --emerald-500: #10b981;
+            
+            --red-500: #ef4444;
+            
+            --amber-400: #fbbf24;
+            --amber-500: #f59e0b;
+            
+            --cyan-400: #22d3ee;
+            --lime-400: #a3e635;
+            
+            --white: #ffffff;
+            --black: #000000;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--slate-50);
+            color: var(--slate-900);
+            scroll-behavior: smooth;
+            line-height: 1.5;
+        }
+
+        a {
+            text-decoration: none;
+            color: inherit;
+        }
+
+        ul {
+            list-style: none;
+        }
+
+        button {
+            cursor: pointer;
+            border: none;
+            background: transparent;
+            font-family: inherit;
+        }
+
+        /* Utilities */
+        .container {
+            max-width: 80rem;
+            margin: 0 auto;
+            padding: 0 1.5rem;
+        }
+
+        .section-py {
+            padding-top: 6rem;
+            padding-bottom: 6rem;
+        }
+
+        .border-t {
+            border-top: 1px solid var(--slate-200);
+        }
+
+        .gradient-text {
+            background: linear-gradient(to right, var(--indigo-600), #9333ea);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .coming-soon-badge {
+            background: rgba(79, 70, 229, 0.1);
+            color: var(--indigo-600);
+            padding: 0.25rem 0.75rem;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 700;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+            display: inline-block;
+        }
+
+        /* Navigation */
+        .nav-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1.5rem;
+        }
+
+        .nav-brand-group {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .nav-brand {
+            font-size: 1.5rem;
+            font-weight: 900;
+            color: var(--indigo-600);
+        }
+
+        .nav-brand span {
+            color: var(--slate-300);
+        }
+
+        .nav-actions {
+            display: flex;
+            align-items: center;
+            gap: 1.5rem;
+        }
+
+        .login-btn-nav {
+            font-size: 0.875rem;
+            font-weight: 700;
+            color: var(--slate-500);
+            transition: color 0.3s;
+            display: none;
+        }
+
+        @media (min-width: 768px) {
+            .login-btn-nav {
+                display: block;
+            }
+        }
+
+        .login-btn-nav:hover {
+            color: var(--indigo-600);
+        }
+
+        .btn-founder {
+            background-color: var(--indigo-600);
+            color: var(--white);
+            padding: 0.625rem 1.5rem;
+            border-radius: 0.75rem;
+            font-weight: 700;
+            transition: background-color 0.3s;
+            box-shadow: 0 10px 15px -3px rgba(79, 70, 229, 0.2);
+        }
+
+        .btn-founder:hover {
+            background-color: var(--indigo-700);
+        }
+
+        /* Hero Section */
+        .hero {
+            text-align: center;
+            padding: 6rem 1.5rem;
+        }
+
+        .hero h1 {
+            font-size: 3.75rem;
+            font-weight: 900;
+            margin-bottom: 2rem;
+            letter-spacing: -0.05em;
+            line-height: 0.9;
+        }
+
+        .hero h1 .text-indigo-600 {
+            color: var(--indigo-600);
+        }
+
+        @media (min-width: 768px) {
+            .hero h1 {
+                font-size: 6rem;
+            }
+        }
+
+        .hero-subtitle {
+            font-size: 1.25rem;
+            color: var(--slate-500);
+            margin: 0 auto 3rem auto;
+            max-width: 48rem;
+            line-height: 1.625;
+            font-weight: 500;
+        }
+
+        @media (min-width: 768px) {
+            .hero-subtitle {
+                font-size: 1.5rem;
+            }
+        }
+
+        .hero-cta-wrapper {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 1.5rem;
+        }
+
+        .btn-legacy {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.75rem;
+            background-color: var(--slate-900);
+            color: var(--white);
+            padding: 1.25rem 2.5rem;
+            border-radius: 1rem;
+            font-weight: 900;
+            font-size: 1.125rem;
+            transition: all 0.3s;
+            box-shadow: 0 20px 25px -5px rgba(226, 232, 240, 1);
+            margin-bottom: 1rem;
+        }
+
+        .btn-legacy:hover {
+            background-color: var(--indigo-600);
+            transform: translateY(-4px);
+        }
+
+        .waitlist-text {
+            font-size: 0.875rem;
+            font-weight: 700;
+            color: var(--slate-400);
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+        }
+
+        /* Stat Section */
+        .stat-section {
+            max-width: 56rem;
+            margin: 0 auto;
+            padding: 0 1.5rem 6rem 1.5rem;
+        }
+
+        .stat-card {
+            background-color: var(--indigo-600);
+            border-radius: 1.5rem;
+            padding: 2.5rem;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+            position: relative;
+            overflow: hidden;
+        }
+
+        @media (min-width: 768px) {
+            .stat-card {
+                padding: 4rem;
+            }
+        }
+
+        .stat-bg-number {
+            position: absolute;
+            top: 0;
+            right: 0;
+            padding: 2rem;
+            opacity: 0.1;
+        }
+
+        .stat-bg-number span {
+            font-size: 8rem;
+            font-weight: 900;
+            color: var(--white);
+        }
+
+        .stat-content {
+            position: relative;
+            z-index: 10;
+        }
+
+        .stat-content h2 {
+            font-size: 1.875rem;
+            font-weight: 900;
+            color: var(--white);
+            margin-bottom: 1.5rem;
+            line-height: 1.2;
+        }
+
+        @media (min-width: 768px) {
+            .stat-content h2 {
+                font-size: 2.25rem;
+            }
+        }
+
+        .stat-content p {
+            color: var(--indigo-100);
+            font-size: 1.125rem;
+            font-weight: 500;
+            max-width: 42rem;
+        }
+
+        @media (min-width: 768px) {
+            .stat-content p {
+                font-size: 1.25rem;
+            }
+        }
+
+        /* Features Grid */
+        .features-grid {
+            display: grid;
+            gap: 2rem;
+        }
+
+        @media (min-width: 768px) {
+            .features-grid {
+                grid-template-columns: repeat(3, 1fr);
+            }
+        }
+
+        .feature-card {
+            padding: 2.5rem;
+            background-color: var(--white);
+            border-radius: 1.5rem;
+            border: 1px solid var(--slate-100);
+            box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+            transition: all 0.3s;
+        }
+
+        .feature-card:hover {
+            border-color: var(--indigo-200);
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+            transform: translateY(-4px);
+        }
+
+        .feature-icon {
+            width: 3rem;
+            height: 3rem;
+            background-color: var(--indigo-50);
+            color: var(--indigo-600);
+            border-radius: 0.5rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5rem;
+            margin-bottom: 1.5rem;
+            transition: background-color 0.3s, color 0.3s;
+        }
+
+        .feature-card:hover .feature-icon {
+            background-color: var(--indigo-600);
+            color: var(--white);
+        }
+
+        .feature-card h3 {
+            font-size: 1.25rem;
+            font-weight: 700;
+            margin-bottom: 0.75rem;
+        }
+
+        .feature-card p {
+            color: var(--slate-500);
+            font-size: 0.875rem;
+            line-height: 1.625;
+        }
+
+        /* Architecture Section */
+        .arch-grid {
+            display: grid;
+            gap: 4rem;
+            align-items: center;
+        }
+
+        @media (min-width: 768px) {
+            .arch-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+
+        .arch-content {
+            text-align: left;
+        }
+
+        .arch-label {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            margin-bottom: 1rem;
+            font-size: 0.625rem;
+            font-weight: 700;
+            letter-spacing: 0.1em;
+            color: var(--indigo-600);
+            text-transform: uppercase;
+            background-color: var(--indigo-50);
+            border-radius: 9999px;
+        }
+
+        .arch-title {
+            font-size: 2.25rem;
+            font-weight: 900;
+            margin-bottom: 1.5rem;
+            letter-spacing: -0.025em;
+        }
+
+        .arch-desc {
+            color: var(--slate-600);
+            margin-bottom: 2rem;
+            line-height: 1.625;
+        }
+
+        .arch-list li {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            font-weight: 600;
+            color: var(--slate-700);
+            margin-bottom: 1rem;
+        }
+
+        .arch-list li.arch-faded {
+            color: var(--slate-400);
+            font-style: italic;
+        }
+
+        .arch-icon {
+            width: 1.5rem;
+            height: 1.5rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+        }
+
+        .arch-icon.green {
+            background-color: var(--green-50);
+            color: var(--green-500);
+        }
+
+        .arch-icon.indigo {
+            background-color: var(--indigo-50);
+            color: var(--indigo-500);
+        }
+
+        /* Code Window */
+        .code-window {
+            background-color: var(--black);
+            padding: 2rem;
+            border-radius: 1.5rem;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+            border: 1px solid var(--slate-800);
+            transform: rotate(0deg);
+            transition: transform 0.5s;
+        }
+
+        @media (min-width: 768px) {
+            .code-window {
+                transform: rotate(2deg);
+            }
+            .code-window:hover {
+                transform: rotate(0deg);
+            }
+        }
+
+        .code-header {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin-bottom: 1.5rem;
+            padding-bottom: 1rem;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .mac-btn {
+            width: 0.75rem;
+            height: 0.75rem;
+            border-radius: 50%;
+        }
+
+        .mac-red { background-color: var(--red-500); }
+        .mac-amber { background-color: var(--amber-500); }
+        .mac-green { background-color: var(--emerald-500); }
+
+        .code-title {
+            color: var(--slate-500);
+            font-size: 0.625rem;
+            font-family: monospace;
+            margin-left: 0.5rem;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            font-weight: 900;
+        }
+
+        .code-content {
+            font-size: 1rem;
+            font-family: monospace;
+            line-height: 1.625;
+            display: block;
+            font-weight: 700;
+            letter-spacing: -0.025em;
+        }
+
+        .text-cyan-400 { color: var(--cyan-400); }
+        .text-white { color: var(--white); }
+        .text-lime-400 { color: var(--lime-400); }
+        .text-amber-400 { color: var(--amber-400); }
+        .text-slate-600 { color: var(--slate-600); }
+        .font-medium { font-weight: 500; }
+        .italic { font-style: italic; }
+
+        /* Pricing Section */
+        .pricing-header {
+            text-align: center;
+            margin-bottom: 4rem;
+        }
+
+        .pricing-header h2 {
+            font-size: 2.25rem;
+            font-weight: 900;
+            margin-bottom: 1rem;
+        }
+
+        .pricing-header p {
+            color: var(--slate-500);
+        }
+
+        .pricing-grid {
+            display: grid;
+            gap: 2rem;
+        }
+
+        @media (min-width: 768px) {
+            .pricing-grid {
+                grid-template-columns: repeat(3, 1fr);
+            }
+        }
+
+        .pricing-card {
+            padding: 2rem;
+            background-color: var(--white);
+            border-radius: 1.5rem;
+            border: 1px solid var(--slate-100);
+            box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+            display: flex;
+            flex-direction: column;
+            transition: box-shadow 0.3s;
+        }
+
+        .pricing-card:hover {
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        }
+
+        .pricing-card.featured {
+            border: 2px solid var(--indigo-600);
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
+            position: relative;
+            transform: scale(1);
+            z-index: 10;
+        }
+
+        @media (min-width: 768px) {
+            .pricing-card.featured {
+                transform: scale(1.05);
+            }
+        }
+
+        .featured-badge {
+            position: absolute;
+            top: -0.75rem;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: var(--indigo-600);
+            color: var(--white);
+            font-size: 0.625rem;
+            font-weight: 900;
+            padding: 0.25rem 1rem;
+            border-radius: 9999px;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+        }
+
+        .pricing-card h3 {
+            font-size: 1.25rem;
+            font-weight: 700;
+            margin-bottom: 0.5rem;
+        }
+
+        .pricing-desc {
+            color: var(--slate-500);
+            font-size: 0.875rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .pricing-price {
+            margin-bottom: 1.5rem;
+        }
+
+        .pricing-amount {
+            font-size: 2.25rem;
+            font-weight: 900;
+        }
+
+        .pricing-period {
+            color: var(--slate-400);
+        }
+
+        .pricing-features {
+            font-size: 0.875rem;
+            color: var(--slate-600);
+            margin-bottom: 2rem;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+        }
+
+        /* Founder Section */
+        .founder-grid {
+            display: grid;
+            gap: 3rem;
+        }
+
+        @media (min-width: 768px) {
+            .founder-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+
+        .founder-card-dark {
+            background-color: var(--slate-900);
+            padding: 2.5rem;
+            border-radius: 1.5rem;
+            border: 1px solid rgba(99, 102, 241, 0.3);
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+            position: relative;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .founder-corner-badge {
+            position: absolute;
+            top: 0;
+            right: 0;
+            background-color: var(--indigo-600);
+            color: var(--white);
+            font-size: 0.625rem;
+            font-weight: 900;
+            padding: 0.25rem 2.5rem;
+            transform: rotate(45deg) translate(2rem, -0.5rem);
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+        }
+
+        .founder-kicker {
+            color: var(--indigo-400);
+            font-size: 0.75rem;
+            font-weight: 900;
+            text-transform: uppercase;
+            letter-spacing: 0.3em;
+            margin-bottom: 1rem;
+        }
+
+        .founder-card-dark h3 {
+            font-size: 1.875rem;
+            font-weight: 900;
+            color: var(--white);
+            margin-bottom: 1rem;
+        }
+
+        .founder-card-dark p {
+            color: var(--slate-400);
+            line-height: 1.625;
+            margin-bottom: 2rem;
+        }
+
+        .founder-list {
+            margin-bottom: 2.5rem;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        .founder-list li {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            color: var(--white);
+            font-weight: 700;
+        }
+
+        .founder-list li.faded {
+            color: rgba(199, 210, 254, 0.7);
+        }
+
+        .founder-list span {
+            color: var(--indigo-400);
+            font-size: 1.25rem;
+        }
+
+        .btn-founder-block {
+            display: block;
+            width: 100%;
+            background-color: var(--indigo-600);
+            color: var(--white);
+            text-align: center;
+            padding: 1rem;
+            border-radius: 1rem;
+            font-weight: 900;
+            transition: background-color 0.3s;
+            box-shadow: 0 20px 25px -5px rgba(99, 102, 241, 0.2);
+            margin-top: auto;
+        }
+
+        .btn-founder-block:hover {
+            background-color: var(--indigo-700);
+        }
+
+        .founder-card-light {
+            background-color: var(--white);
+            padding: 2.5rem;
+            border-radius: 1.5rem;
+            border: 1px solid var(--slate-100);
+            box-shadow: 0 20px 25px -5px rgba(226, 232, 240, 0.5);
+            display: flex;
+            flex-direction: column;
+        }
+
+        .founder-kicker-light {
+            color: var(--indigo-600);
+            font-size: 0.875rem;
+            font-weight: 900;
+            text-transform: uppercase;
+            letter-spacing: 0.2em;
+            margin-bottom: 1rem;
+        }
+
+        .founder-card-light h3 {
+            font-size: 1.875rem;
+            font-weight: 900;
+            color: var(--slate-950);
+            margin-bottom: 1rem;
+        }
+
+        .founder-card-light p {
+            color: var(--slate-500);
+            line-height: 1.625;
+            margin-bottom: 2rem;
+        }
+
+        .standard-benefit {
+            padding: 1rem;
+            background-color: var(--slate-50);
+            border-radius: 1rem;
+            border: 1px solid var(--slate-100);
+            margin-bottom: 1rem;
+        }
+
+        .benefit-kicker {
+            font-size: 0.75rem;
+            color: var(--slate-400);
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 0.25rem;
+        }
+
+        .benefit-desc {
+            font-size: 0.875rem;
+            color: var(--slate-700);
+            font-weight: 500;
+        }
+
+        .btn-disabled {
+            width: 100%;
+            background-color: var(--slate-100);
+            color: var(--slate-400);
+            padding: 1rem;
+            border-radius: 1rem;
+            font-weight: 700;
+            cursor: not-allowed;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        /* Footer */
+        .footer {
+            text-align: center;
+            padding: 5rem 1.5rem;
+        }
+
+        .powered-by {
+            opacity: 0.4;
+            filter: grayscale(100%);
+            transition: all 0.3s;
+            margin-bottom: 2rem;
+        }
+
+        .powered-by:hover {
+            opacity: 1;
+            filter: grayscale(0%);
+        }
+
+        .powered-kicker {
+            font-size: 0.75rem;
+            font-weight: 900;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: var(--slate-400);
+            margin-bottom: 1rem;
+        }
+
+        .powered-brand {
+            font-size: 1.5rem;
+            font-weight: 700;
+            font-style: italic;
+            color: var(--slate-700);
+        }
+
+        .footer-copy {
+            font-size: 0.875rem;
+            color: var(--slate-400);
+            margin-bottom: 0.5rem;
+        }
+
+        .footer-copy a, .footer-credit a {
+            font-weight: 700;
+            color: var(--indigo-500);
+        }
+
+        .footer-copy a:hover, .footer-credit a:hover {
+            text-decoration: underline;
+        }
+
+        .footer-credit {
+            font-size: 0.875rem;
+            color: var(--slate-500);
+        }
+
+        /* Modal */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background-color: rgba(2, 6, 23, 0.6);
+            backdrop-filter: blur(12px);
+            align-items: center;
+            justify-content: center;
+            padding: 1.5rem;
+            z-index: 50;
+        }
+
+        .modal-overlay.active {
+            display: flex;
+        }
+
+        .modal-card {
+            background-color: var(--white);
+            padding: 2.5rem;
+            border-radius: 1.5rem;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+            width: 100%;
+            max-width: 28rem;
+            position: relative;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .modal-close {
+            position: absolute;
+            top: 1.5rem;
+            right: 1.5rem;
+            color: var(--slate-400);
+            font-size: 1.25rem;
+            font-weight: 700;
+            transition: color 0.3s;
+        }
+
+        .modal-close:hover {
+            color: var(--slate-900);
+        }
+
+        .modal-header {
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+
+        .modal-brand {
+            font-size: 1.875rem;
+            font-weight: 900;
+            color: var(--indigo-600);
+            text-transform: uppercase;
+            letter-spacing: -0.05em;
+        }
+
+        .modal-brand span {
+            color: var(--indigo-300);
+            font-size: 1.5rem;
+        }
+
+        .modal-subtitle {
+            font-size: 0.75rem;
+            font-weight: 700;
+            color: var(--slate-400);
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            margin-top: 0.25rem;
+        }
+
+        .form-group {
+            margin-bottom: 1rem;
+        }
+
+        .form-label {
+            display: block;
+            font-size: 0.75rem;
+            font-weight: 700;
+            color: var(--slate-400);
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            margin-bottom: 0.5rem;
+            margin-left: 0.25rem;
+        }
+
+        .form-input {
+            width: 100%;
+            padding: 1rem;
+            background-color: var(--slate-50);
+            border: 1px solid var(--slate-200);
+            border-radius: 1rem;
+            outline: none;
+            transition: all 0.3s;
+            font-family: inherit;
+            font-size: 1rem;
+        }
+
+        .form-input:focus {
+            border-color: var(--indigo-500);
+            background-color: var(--white);
+            box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
+        }
+
+        .btn-submit {
+            width: 100%;
+            background-color: var(--indigo-600);
+            color: var(--white);
+            padding: 1rem;
+            border-radius: 1rem;
+            font-weight: 900;
+            box-shadow: 0 20px 25px -5px rgba(224, 231, 255, 1);
+            transition: all 0.3s;
+            margin-top: 1rem;
+        }
+
+        .btn-submit:hover {
+            background-color: var(--indigo-700);
+        }
+
+        .btn-submit:active {
+            transform: scale(0.98);
+        }
+    </style>
+</head>
+<body>
+
+    <div id="landing-view">
+        <nav class="container nav-header">
+           <div class="nav-brand-group">
+                <img src="Logo.png" alt="FLOURish Logo" style="height: 2rem; width: auto;">
+                <div class="nav-brand">FLOURish™<span>.</span></div>
+                <span class="coming-soon-badge">Founder's Alpha</span>
+            </div>
+            <div class="nav-actions">
+                <button onclick="toggleLogin(true)" class="login-btn-nav">
+                    Tenant Login
+                </button>
+                <a href="#founder-section" class="btn-founder">
+                    Become a Founder
+                </a>
+            </div>
+        </nav>
+
+        <header class="container hero">
+            <h1>
+                We needed a <span class="gradient-text">name.</span><br>
+                You needed a <span class="text-indigo-600">bakery.</span>
+            </h1>
+            
+            <p class="hero-subtitle">
+                The high-performance operating system for artisan bakers. 
+                Automatically calculate true FIFO margins, manage daily batch logic, and keep your secret recipes strictly yours.
+            </p>
+            
+            <div class="hero-cta-wrapper">
+                <a href="#founder-section" class="btn-legacy">
+                    ☕ Unlock the Founder's Legacy Rate
+                </a>
+                <p class="waitlist-text">Public Waitlist Opens Soon</p>
+            </div>
+        </header>
+
+        <section class="stat-section">
+            <div class="stat-card">
+                <div class="stat-bg-number">
+                    <span>12%</span>
+                </div>
+                <div class="stat-content">
+                    <h2>
+                        Most bakeries lose 12% of their margin to unrecorded waste and volatile ingredient costs.
+                    </h2>
+                    <p>
+                        We built the engine that tracks every gram and every cent, giving you total visibility over your artisanal operations.
+                    </p>
+                </div>
+            </div>
+        </section>
+
+        <section id="features" class="container section-py border-t">
+            <div class="features-grid">
+                <div class="feature-card">
+                    <div class="feature-icon">📦</div>
+                    <h3>FIFO Lot Tracking</h3>
+                    <p>Most POS systems guess your margins. We calculate them based on the exact price of the flour used in today's batch.</p>
+                </div>
+                
+                <div class="feature-card">
+                    <div class="feature-icon">🥐</div>
+                    <h3>Production Pipeline</h3>
+                    <p>Transform raw ingredients into finished goods. FLOURish handles inventory deduction and labor allocation automatically.</p>
+                </div>
+
+                <div class="feature-card">
+                    <div class="feature-icon">🔐</div>
+                    <h3>Enterprise Security</h3>
+                    <p>Multi-tenant isolation and encrypted sessions. Built with security-first protocols for artisan data protection.</p>
+                </div>
+            </div>
+        </section>
+
+        <section class="container section-py border-t">
+            <div class="arch-grid">
+                <div class="arch-content">
+                    <div class="arch-label">
+                        Architecture
+                    </div>
+                    <h2 class="arch-title">Security by design.</h2>
+                    <p class="arch-desc">Artisan work deserves professional protection. Our core engine uses row-level logical isolation to ensure that your recipes, costs, and customer data never leak.</p>
+                    <ul class="arch-list">
+                        <li>
+                            <span class="arch-icon green">✓</span> 
+                            Identity-Based Access Control
+                        </li>
+                        <li>
+                            <span class="arch-icon green">✓</span> 
+                            FIFO Costing Logic
+                        </li>
+                        <li class="arch-faded">
+                            <span class="arch-icon indigo">→</span> 
+                            Automated Financial Auditing
+                        </li>
+                    </ul>
+                </div>
+                <div class="code-window">
+                    <div class="code-header">
+                        <div class="mac-btn mac-red"></div>
+                        <div class="mac-btn mac-amber"></div>
+                        <div class="mac-btn mac-green"></div>
+                        <span class="code-title">security_engine.py</span>
+                    </div>
+                    <code class="code-content" style="color: #f8fafc;">
+                        <span class="text-cyan-400">@router</span>.<span class="text-white">get</span>(<span class="text-lime-400">"/inventory/{lot_id}"</span>)<br>
+                        <span class="text-amber-400">def</span> <span class="text-white">get_secure_lot</span>(lot_id: <span class="text-cyan-400">int</span>):<br>
+                        <span class="text-slate-600 font-medium italic">&nbsp;&nbsp;# Row-Level Security check</span><br>
+                        &nbsp;&nbsp;<span class="text-amber-400">return</span> <span class="text-white">db.query(models.Lot).filter(</span><br>
+                        &nbsp;&nbsp;&nbsp;&nbsp;<span class="text-white">models.Lot.id == lot_id,</span><br>
+                        &nbsp;&nbsp;&nbsp;&nbsp;<span class="text-white">models.Lot.tenant_id == user.tenant_id</span><br>
+                        &nbsp;&nbsp;<span class="text-white">).first()</span>
+                    </code>
+                </div>
+            </div>
+        </section>
+
+        <section id="pricing" class="container section-py border-t">
+            <div class="pricing-header">
+                <h2>Pricing that grows with your dough.</h2>
+                <p>Lock in your Legacy Rate today and never pay full price.</p>
+            </div>
+
+            <div class="pricing-grid">
+                <div class="pricing-card">
+                    <h3>Cottage</h3>
+                    <p class="pricing-desc">For the cottage baker perfecting their craft.</p>
+                    <div class="pricing-price">
+                        <span class="pricing-amount">$19.99</span><span class="pricing-period">/mo</span>
+                    </div>
+                    <ul class="pricing-features">
+                        <li>✓ Full FIFO Engine</li>
+                        <li>✓ Batch Transformation</li>
+                        <li>✓ Single User</li>
+                    </ul>
+                </div>
+
+                <div class="pricing-card featured">
+                    <div class="featured-badge">Most Popular</div>
+                    <h3>Artisan</h3>
+                    <p class="pricing-desc">For established shops scaling their production.</p>
+                    <div class="pricing-price">
+                        <span class="pricing-amount">$49.99</span><span class="pricing-period">/mo</span>
+                    </div>
+                    <ul class="pricing-features">
+                        <li>✓ Everything in Cottage</li>
+                        <li>✓ Up to 5 Staff Users</li>
+                        <li>✓ Waste & Margin Analytics</li>
+                        <li>✓ Custom Order Pipeline</li>
+                    </ul>
+                </div>
+
+                <div class="pricing-card">
+                    <h3>Commercial</h3>
+                    <p class="pricing-desc">For wholesale and multi-location operations.</p>
+                    <div class="pricing-price">
+                        <span class="pricing-amount">$99.99</span><span class="pricing-period">/mo</span>
+                    </div>
+                    <ul class="pricing-features">
+                        <li>✓ Everything in Artisan</li>
+                        <li>✓ Unlimited Users</li>
+                        <li>✓ Advanced Security Auditing</li>
+                        <li>✓ Wholesale Logistics</li>
+                    </ul>
+                </div>
+            </div>
+        </section>
+
+        <section id="founder-section" class="container section-py border-t">
+            <div class="founder-grid">
+                
+                <div class="founder-card-dark">
+                    <div class="founder-corner-badge">
+                        Founder
+                    </div>
+                    
+                    <div class="founder-kicker">The Founders' Circle</div>
+                    <h3>Back the Build.</h3>
+                    <p>
+                        Support our development on Ko-fi to unlock the ultimate head-start for your bakery. Your contribution directly funds our secure infrastructure.
+                    </p>
+                    
+                    <ul class="founder-list">
+                        <li>
+                            <span>✓</span> 1.5 Years Total Free Access
+                        </li>
+                        <li>
+                            <span>✓</span> Permanent 15% Legacy Discount
+                        </li>
+                        <li class="faded">
+                            <span>✓</span> Early Access to New Features
+                        </li>
+                    </ul>
+
+                    <a href="https://ko-fi.com/W7W71JPCKI/shop" target="_blank" class="btn-founder-block">
+                        Become a Founder
+                    </a>
+                </div>
+
+                <div class="founder-card-light">
+                    <div class="founder-kicker-light">For New Tenants</div>
+                    <h3>Get your feet on the ground.</h3>
+                    <p>
+                        Starting or scaling a bakery is hard enough. Every new tenant on FLOURish gets their <b>first 3 months completely free</b>. 
+                    </p>
+                    
+                    <div style="margin-top: auto;">
+                        <div class="standard-benefit">
+                            <p class="benefit-kicker">Standard Benefit</p>
+                            <p class="benefit-desc">No credit card required to start. Perfect your crumb and build your community first.</p>
+                        </div>
+                        <button class="btn-disabled">
+                            Waitlist Opening Soon
+                        </button>
+                    </div>
+                </div>
+
+            </div>
+        </section>
+
+        <footer class="container footer border-t">
+            <div class="powered-by">
+                <p class="powered-kicker">Proudly Powering</p>
+                <h2 class="powered-brand">"Baked with Love by Jackie"</h2>
+            </div>
+            <p class="footer-copy">
+                &copy; 2026 FLOURish™ by <a href="https://knead.name">knead.name</a>.
+            </p>
+            <p class="footer-credit">
+                Built with precision by <a href="https://www.linkedin.com/in/tythomasson/">Ty Thomasson</a>.
+            </p>
+        </footer>
+    </div>
+    
+    <div id="login-view" class="modal-overlay">
+        <div class="modal-card">
+            <button onclick="toggleLogin(false)" class="modal-close">✕</button>
+            <div class="modal-header">
+                <h2 class="modal-brand">FLOURish™<span>.</span></h2>
+                <p class="modal-subtitle">Tenant Portal</p>
+            </div>
+            <form id="login-form">
+                <div class="form-group">
+                    <label class="form-label">Username</label>
+                    <input type="text" id="username" class="form-input" placeholder="baker_one" required>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Password</label>
+                    <input type="password" id="password" class="form-input" placeholder="••••••••" required>
+                </div>
+                <button type="submit" class="btn-submit">
+                    Open the Bakery
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        function toggleLogin(show) {
+            const loginView = document.getElementById('login-view');
+            if (show) {
+                loginView.classList.add('active');
+            } else {
+                loginView.classList.remove('active');
+            }
+        }
+    </script>
+</body>
+</html>
+
+##############################
+
+
+FILE: frontend/LogoUncompressed.png
+-----------------------------------
+[Error reading file: 'utf-8' codec can't decode byte 0x89 in position 0: invalid start byte]
+
+##############################
+
+
+FILE: frontend/homepage copy 2.html
+-----------------------------------
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Flourish | Powered by knead.name</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+        .gradient-text {
+            background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+    </style>
+</head>
+<body class="bg-white text-slate-900">
+
+    <nav class="flex justify-between items-center p-6 max-w-7xl mx-auto">
+        <div class="text-2xl font-black tracking-tighter text-indigo-600">
+            flourish<span class="text-slate-300">.</span>
+        </div>
+        <div class="flex items-center gap-6">
+            <a href="https://ko-fi.com/your-username" target="_blank" class="text-sm font-bold text-slate-500 hover:text-indigo-600 transition">Support Development</a>
+            <button onclick="toggleLogin(true)" class="bg-slate-100 text-slate-900 px-5 py-2 rounded-lg font-bold hover:bg-slate-200 transition">
+                Tenant Login
+            </button>
+        </div>
+    </nav>
+
+    <header class="max-w-7xl mx-auto px-6 pt-20 pb-32 text-center">
+        <div class="inline-block px-4 py-1.5 mb-6 text-xs font-bold tracking-widest text-indigo-600 uppercase bg-indigo-50 rounded-full">
+            Currently in Private Beta
+        </div>
+        <h1 class="text-6xl md:text-8xl font-black mb-8 tracking-tighter leading-none">
+            Scale your craft <br>without the <span class="gradient-text">guesswork.</span>
+        </h1>
+        <p class="text-xl text-slate-500 mb-12 max-w-2xl mx-auto leading-relaxed">
+            The intelligent operating system for artisanal bakeries. 
+            Automated FIFO inventory, precise margin tracking, and secure multi-tenant architecture.
+        </p>
+        
+        <div class="flex flex-col sm:flex-row justify-center gap-4">
+            <a href="https://ko-fi.com/your-username" target="_blank" class="bg-indigo-600 text-white px-10 py-4 rounded-2xl font-bold text-lg hover:bg-indigo-700 shadow-xl shadow-indigo-200 transition-all hover:-translate-y-1">
+                Fund Development on Ko-fi
+            </a>
+            <button class="bg-white border border-slate-200 px-10 py-4 rounded-2xl font-bold text-lg hover:bg-slate-50 transition">
+                Join the Waitlist
+            </button>
+        </div>
+    </header>
+
+    <section class="bg-slate-50 py-24 border-y border-slate-100">
+        <div class="max-w-5xl mx-auto px-6">
+            <div class="grid md:grid-cols-2 gap-16 items-center">
+                <div class="text-left">
+                    <h2 class="text-3xl font-black mb-4">Under the hood.</h2>
+                    <p class="text-slate-600 mb-6">Building a production-ready SaaS requires more than just a pretty UI. We're currently finalizing the core security engine.</p>
+                    <ul class="space-y-4">
+                        <li class="flex items-center gap-3 font-medium text-slate-700">
+                            <span class="text-green-500">✓</span> Multi-Tenant Data Isolation
+                        </li>
+                        <li class="flex items-center gap-3 font-medium text-slate-700">
+                            <span class="text-green-500">✓</span> FIFO Costing Engine
+                        </li>
+                        <li class="flex items-center gap-3 font-medium text-slate-400 italic">
+                            <span class="text-indigo-500">→</span> Automated Ledger Integration (In Progress)
+                        </li>
+                    </ul>
+                </div>
+                <div class="bg-white p-8 rounded-3xl shadow-xl border border-slate-100 rotate-2">
+                    <div class="flex items-center gap-2 mb-4">
+                        <div class="w-3 h-3 rounded-full bg-red-400"></div>
+                        <div class="w-3 h-3 rounded-full bg-yellow-400"></div>
+                        <div class="w-3 h-3 rounded-full bg-green-400"></div>
+                    </div>
+                    <code class="text-sm text-indigo-600 font-mono">
+                        // Security First <br>
+                        @router.delete("/{tenant_id}") <br>
+                        def delete_tenant(tenant_id: int): <br>
+                        &nbsp;&nbsp;await cascade_cleanup(tenant_id)
+                    </code>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <footer class="py-20 text-center">
+        <p class="text-slate-400 font-bold uppercase tracking-widest text-xs mb-4">Incubated with</p>
+        <h2 class="text-2xl font-bold italic text-slate-700 mb-8">"Baked with Love by Jackie"</h2>
+        <div class="h-px w-24 bg-slate-200 mx-auto mb-8"></div>
+        <p class="text-slate-500 text-sm">
+            © 2026 Flourish Software. A <a href="https://knead.name" class="font-bold text-indigo-600">knead.name</a> project.
+        </p>
+    </footer>
+
+    <div id="login-view" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-md flex items-center justify-center p-6 z-50">
+        <div class="bg-white p-10 rounded-3xl shadow-2xl w-full max-w-md relative border border-white/20">
+            <button onclick="toggleLogin(false)" class="absolute top-6 right-6 text-slate-400 hover:text-slate-600 text-xl">✕</button>
+            <div class="text-center mb-8">
+                <h2 class="text-3xl font-black text-indigo-600">Flourish Login</h2>
+                <p class="text-slate-400 text-sm mt-1">Authorized access only</p>
+            </div>
+            <form class="space-y-4">
+                <input type="text" placeholder="Username" class="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all">
+                <input type="password" placeholder="Password" class="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all">
+                <button class="w-full bg-indigo-600 text-white p-4 rounded-2xl hover:bg-indigo-700 font-bold shadow-lg shadow-indigo-100 transition-all">
+                    Open the Bakery
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        function toggleLogin(show) {
+            const loginView = document.getElementById('login-view');
+            loginView.classList.toggle('hidden', !show);
+        }
+    </script>
+</body>
+</html>
+
+##############################
+
+
+FILE: frontend/android-chrome-192x192.png
+-----------------------------------------
+[Error reading file: 'utf-8' codec can't decode byte 0x89 in position 0: invalid start byte]
+
+##############################
+
+
 FILE: frontend/index.html
 -------------------------
 <!DOCTYPE html>
@@ -1946,44 +3588,66 @@ FILE: frontend/index.html
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BakeryOS - Tenant Panel</title>
+    <title>BakeryOS | Knead.name</title>
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-gray-50 text-gray-800 font-sans h-screen flex">
 
-    <div id="login-view" class="flex flex-col items-center justify-center w-full h-full">
-        <div class="bg-white p-8 rounded-lg shadow-md w-96">
-            <h1 class="text-3xl font-bold mb-6 text-center text-indigo-600">BakeryOS</h1>
-            <form id="login-form" class="space-y-4">
+    <div id="login-view" class="flex flex-col items-center justify-center w-full h-full bg-slate-50">
+        <div class="bg-white p-10 rounded-2xl shadow-xl w-full max-w-md border border-slate-100">
+            
+            <div class="text-center mb-10">
+                <h1 class="text-5xl font-black tracking-tight text-indigo-600 mb-2">
+                    knead<span class="text-indigo-400">.name</span>
+                </h1>
+                <div class="h-1 w-12 bg-indigo-600 mx-auto rounded-full mb-4"></div>
+                <p class="text-slate-500 font-medium leading-tight">
+                    We needed a name.<br>
+                    <span class="text-slate-400">You needed something for your bakery.</span>
+                </p>
+            </div>
+
+            <form id="login-form" class="space-y-5">
                 <div>
-                    <label class="block text-sm font-medium">Username</label>
-                    <input type="text" id="username" class="w-full mt-1 p-2 border rounded" required>
+                    <label class="block text-xs font-bold uppercase tracking-widest text-slate-400 mb-1 ml-1">Username</label>
+                    <input type="text" id="username" class="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:bg-white outline-none transition-all" required>
                 </div>
                 <div>
-                    <label class="block text-sm font-medium">Password</label>
-                    <input type="password" id="password" class="w-full mt-1 p-2 border rounded" required>
+                    <label class="block text-xs font-bold uppercase tracking-widest text-slate-400 mb-1 ml-1">Password</label>
+                    <input type="password" id="password" class="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:bg-white outline-none transition-all" required>
                 </div>
-                <button type="submit" class="w-full bg-indigo-600 text-white p-2 rounded hover:bg-indigo-700 font-bold">Sign In</button>
-                <p id="login-error" class="text-red-500 text-sm hidden"></p>
+                <button type="submit" class="w-full bg-indigo-600 text-white p-4 rounded-xl hover:bg-indigo-700 font-bold shadow-lg shadow-indigo-100 transition-all active:scale-[0.98]">
+                    Open the Bakery
+                </button>
+                <p id="login-error" class="text-red-500 text-sm text-center font-medium hidden"></p>
             </form>
+
+            <div class="mt-8 pt-6 border-t border-slate-50 text-center">
+                <p class="text-[10px] text-slate-300 uppercase tracking-widest font-bold italic">FLOURish SaaS v1.0</p>
+            </div>
         </div>
     </div>
 
-    <div id="dashboard-view" class="hidden w-full h-full flex">
+<div id="dashboard-view" class="hidden w-full h-full flex">
         
         <aside class="w-64 bg-indigo-900 text-white flex flex-col shrink-0">
             <div class="p-6 border-b border-indigo-800">
-                <h2 id="bakery-name-display" class="text-xl font-bold break-words">BakeryOS</h2>
-                <p id="user-role-display" class="text-xs text-indigo-300 mt-1"></p>
+                <h2 class="text-2xl font-black tracking-tighter">
+                    FLOUR<span class="text-indigo-400 font-medium">ish</span>
+                </h2>
+                
+                <p id="tenant-name-display" class="text-sm font-bold text-white mt-2 break-words opacity-90"></p>
+                
+                <p id="user-role-display" class="text-[10px] text-indigo-300 mt-1 uppercase tracking-widest font-bold"></p>
             </div>
             <nav class="flex-1 p-4 space-y-2">
                 <button onclick="showSection('inventory')" class="w-full text-left p-2 hover:bg-indigo-800 rounded">📦 Inventory</button>
                 <button onclick="showSection('products')" class="w-full text-left p-2 hover:bg-indigo-800 rounded">🥐 Products & POS</button>
                 <button onclick="showSection('orders')" class="w-full text-left p-2 hover:bg-indigo-800 rounded">📋 Custom Orders</button>
                 <button onclick="showSection('finances')" class="w-full text-left p-2 hover:bg-indigo-800 rounded">💰 Finances</button>
-                <button onclick="showSection('transactions')" class="w-full text-left p-2 hover:bg-indigo-800 rounded">📖 Ledger</button>
+                <button onclick="showSection('transactions')" class="text-left p-2 hover:bg-indigo-800 rounded">📖 Ledger</button>
             </nav>
-            <button onclick="logout()" class="p-4 bg-indigo-950 hover:bg-red-600 text-left font-bold">🚪 Logout</button>
+            <button onclick="logout()" class="p-4 bg-indigo-950 hover:bg-red-600 text-left font-bold transition-colors">🚪 Logout</button>
         </aside>
 
         <main class="flex-1 p-8 overflow-y-auto">
@@ -2237,6 +3901,13 @@ FILE: frontend/index.html
 ##############################
 
 
+FILE: frontend/favicon.ico
+--------------------------
+[Error reading file: 'utf-8' codec can't decode byte 0x9e in position 34: invalid start byte]
+
+##############################
+
+
 FILE: frontend/app.js
 ---------------------
 // app.js
@@ -2324,7 +3995,7 @@ async function fetchUserInfo() {
         const data = await res.json();
         
         // Inject the bakery name and user info into the sidebar
-        document.getElementById('bakery-name-display').textContent = data.business_name;
+        document.getElementById('tenant-name-display').innerText = data.business_name;
         document.getElementById('user-role-display').textContent = `User: ${data.username} (${data.role})`;
     } catch (err) {
         console.error("Failed to fetch user info:", err);
@@ -2716,12 +4387,34 @@ async function fetchOrders() {
                 <td class="p-2 border-b">${new Date(order.delivery_date).toLocaleDateString()}</td>
                 <td class="p-2 border-b">
                     <span class="px-2 py-1 bg-yellow-100 text-yellow-800 text-xs rounded-full font-bold">
-                        ${order.status}
+                        <select onchange="updateOrderStatus(${order.id}, this.value)" class="p-1 border rounded text-xs font-bold">
+                            <option value="Quote Pending" ${order.status === 'Quote Pending' ? 'selected' : ''}>Quote Pending</option>
+                            <option value="Deposit Paid" ${order.status === 'Deposit Paid' ? 'selected' : ''}>Deposit Paid</option>
+                            <option value="Baking Scheduled" ${order.status === 'Baking Scheduled' ? 'selected' : ''}>Baking Scheduled</option>
+                            <option value="Ready for Pickup" ${order.status === 'Ready for Pickup' ? 'selected' : ''}>Ready for Pickup</option>
+                            <option value="Completed" ${order.status === 'Completed' ? 'selected' : ''}>Completed</option>
+                            <option value="Cancelled" ${order.status === 'Cancelled' ? 'selected' : ''}>Cancelled</option>
+                        </select>
                     </span>
                 </td>
             </tr>
         `).join('');
     } catch (err) { console.error(err); }
+}
+
+async function updateOrderStatus(orderId, newStatus) {
+    try {
+        const res = await fetch(`${API_URL}/orders/${orderId}/update-pipeline`, {
+            method: 'PUT',
+            headers: getHeaders(),
+            body: JSON.stringify({ status: newStatus })
+        });
+        if (!res.ok) throw await res.json();
+        alert("Status updated!");
+        fetchOrders(); // Refresh the list
+    } catch (err) {
+        alert("Failed to update status: " + (err.detail || "Error"));
+    }
 }
 
 async function logWaste(lotId) {
@@ -3132,5 +4825,12 @@ FILE: frontend/admin.html
     </script>
 </body>
 </html>
+
+##############################
+
+
+FILE: frontend/apple-touch-icon.png
+-----------------------------------
+[Error reading file: 'utf-8' codec can't decode byte 0x89 in position 0: invalid start byte]
 
 ##############################

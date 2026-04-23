@@ -1,0 +1,1243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FLOURish™ | The Artisan Operating System</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&display=swap');
+
+        :root {
+            --slate-50: #f8fafc;
+            --slate-100: #f1f5f9;
+            --slate-200: #e2e8f0;
+            --slate-300: #cbd5e1;
+            --slate-400: #94a3b8;
+            --slate-500: #64748b;
+            --slate-600: #475569;
+            --slate-700: #334155;
+            --slate-800: #1e293b;
+            --slate-900: #0f172a;
+            --slate-950: #020617;
+            
+            --indigo-50: #eef2ff;
+            --indigo-100: #e0e7ff;
+            --indigo-200: #c7d2fe;
+            --indigo-300: #a5b4fc;
+            --indigo-400: #818cf8;
+            --indigo-500: #6366f1;
+            --indigo-600: #4f46e5;
+            --indigo-700: #4338ca;
+            
+            --green-50: #f0fdf4;
+            --green-500: #22c55e;
+            --emerald-500: #10b981;
+            
+            --red-500: #ef4444;
+            
+            --amber-400: #fbbf24;
+            --amber-500: #f59e0b;
+            
+            --cyan-400: #22d3ee;
+            --lime-400: #a3e635;
+            
+            --white: #ffffff;
+            --black: #000000;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--slate-50);
+            color: var(--slate-900);
+            scroll-behavior: smooth;
+            line-height: 1.5;
+        }
+
+        a {
+            text-decoration: none;
+            color: inherit;
+        }
+
+        ul {
+            list-style: none;
+        }
+
+        button {
+            cursor: pointer;
+            border: none;
+            background: transparent;
+            font-family: inherit;
+        }
+
+        /* Utilities */
+        .container {
+            max-width: 80rem;
+            margin: 0 auto;
+            padding: 0 1.5rem;
+        }
+
+        .section-py {
+            padding-top: 6rem;
+            padding-bottom: 6rem;
+        }
+
+        .border-t {
+            border-top: 1px solid var(--slate-200);
+        }
+
+        .gradient-text {
+            background: linear-gradient(to right, var(--indigo-600), #9333ea);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .coming-soon-badge {
+            background: rgba(79, 70, 229, 0.1);
+            color: var(--indigo-600);
+            padding: 0.25rem 0.75rem;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 700;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+            display: inline-block;
+        }
+
+        /* Navigation */
+        .nav-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1.5rem;
+        }
+
+        .nav-brand-group {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .nav-brand {
+            font-size: 1.5rem;
+            font-weight: 900;
+            color: var(--indigo-600);
+        }
+
+        .nav-brand span {
+            color: var(--slate-300);
+        }
+
+        .nav-actions {
+            display: flex;
+            align-items: center;
+            gap: 1.5rem;
+        }
+
+        .login-btn-nav {
+            font-size: 0.875rem;
+            font-weight: 700;
+            color: var(--slate-500);
+            transition: color 0.3s;
+            display: none;
+        }
+
+        @media (min-width: 768px) {
+            .login-btn-nav {
+                display: block;
+            }
+        }
+
+        .login-btn-nav:hover {
+            color: var(--indigo-600);
+        }
+
+        .btn-founder {
+            background-color: var(--indigo-600);
+            color: var(--white);
+            padding: 0.625rem 1.5rem;
+            border-radius: 0.75rem;
+            font-weight: 700;
+            transition: background-color 0.3s;
+            box-shadow: 0 10px 15px -3px rgba(79, 70, 229, 0.2);
+        }
+
+        .btn-founder:hover {
+            background-color: var(--indigo-700);
+        }
+
+        /* Hero Section */
+        .hero {
+            text-align: center;
+            padding: 6rem 1.5rem;
+        }
+
+        .hero h1 {
+            font-size: 3.75rem;
+            font-weight: 900;
+            margin-bottom: 2rem;
+            letter-spacing: -0.05em;
+            line-height: 0.9;
+        }
+
+        .hero h1 .text-indigo-600 {
+            color: var(--indigo-600);
+        }
+
+        @media (min-width: 768px) {
+            .hero h1 {
+                font-size: 6rem;
+            }
+        }
+
+        .hero-subtitle {
+            font-size: 1.25rem;
+            color: var(--slate-500);
+            margin: 0 auto 3rem auto;
+            max-width: 48rem;
+            line-height: 1.625;
+            font-weight: 500;
+        }
+
+        @media (min-width: 768px) {
+            .hero-subtitle {
+                font-size: 1.5rem;
+            }
+        }
+
+        .hero-cta-wrapper {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 1.5rem;
+        }
+
+        .btn-legacy {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.75rem;
+            background-color: var(--slate-900);
+            color: var(--white);
+            padding: 1.25rem 2.5rem;
+            border-radius: 1rem;
+            font-weight: 900;
+            font-size: 1.125rem;
+            transition: all 0.3s;
+            box-shadow: 0 20px 25px -5px rgba(226, 232, 240, 1);
+            margin-bottom: 1rem;
+        }
+
+        .btn-legacy:hover {
+            background-color: var(--indigo-600);
+            transform: translateY(-4px);
+        }
+
+        .waitlist-text {
+            font-size: 0.875rem;
+            font-weight: 700;
+            color: var(--slate-400);
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+        }
+
+        /* Stat Section */
+        .stat-section {
+            max-width: 56rem;
+            margin: 0 auto;
+            padding: 0 1.5rem 6rem 1.5rem;
+        }
+
+        .stat-card {
+            background-color: var(--indigo-600);
+            border-radius: 1.5rem;
+            padding: 2.5rem;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+            position: relative;
+            overflow: hidden;
+        }
+
+        @media (min-width: 768px) {
+            .stat-card {
+                padding: 4rem;
+            }
+        }
+
+        .stat-bg-number {
+            position: absolute;
+            top: 0;
+            right: 0;
+            padding: 2rem;
+            opacity: 0.1;
+        }
+
+        .stat-bg-number span {
+            font-size: 8rem;
+            font-weight: 900;
+            color: var(--white);
+        }
+
+        .stat-content {
+            position: relative;
+            z-index: 10;
+        }
+
+        .stat-content h2 {
+            font-size: 1.875rem;
+            font-weight: 900;
+            color: var(--white);
+            margin-bottom: 1.5rem;
+            line-height: 1.2;
+        }
+
+        @media (min-width: 768px) {
+            .stat-content h2 {
+                font-size: 2.25rem;
+            }
+        }
+
+        .stat-content p {
+            color: var(--indigo-100);
+            font-size: 1.125rem;
+            font-weight: 500;
+            max-width: 42rem;
+        }
+
+        @media (min-width: 768px) {
+            .stat-content p {
+                font-size: 1.25rem;
+            }
+        }
+
+        /* Features Grid */
+        .features-grid {
+            display: grid;
+            gap: 2rem;
+        }
+
+        @media (min-width: 768px) {
+            .features-grid {
+                grid-template-columns: repeat(3, 1fr);
+            }
+        }
+
+        .feature-card {
+            padding: 2.5rem;
+            background-color: var(--white);
+            border-radius: 1.5rem;
+            border: 1px solid var(--slate-100);
+            box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+            transition: all 0.3s;
+        }
+
+        .feature-card:hover {
+            border-color: var(--indigo-200);
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+            transform: translateY(-4px);
+        }
+
+        .feature-icon {
+            width: 3rem;
+            height: 3rem;
+            background-color: var(--indigo-50);
+            color: var(--indigo-600);
+            border-radius: 0.5rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5rem;
+            margin-bottom: 1.5rem;
+            transition: background-color 0.3s, color 0.3s;
+        }
+
+        .feature-card:hover .feature-icon {
+            background-color: var(--indigo-600);
+            color: var(--white);
+        }
+
+        .feature-card h3 {
+            font-size: 1.25rem;
+            font-weight: 700;
+            margin-bottom: 0.75rem;
+        }
+
+        .feature-card p {
+            color: var(--slate-500);
+            font-size: 0.875rem;
+            line-height: 1.625;
+        }
+
+        /* Architecture Section */
+        .arch-grid {
+            display: grid;
+            gap: 4rem;
+            align-items: center;
+        }
+
+        @media (min-width: 768px) {
+            .arch-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+
+        .arch-content {
+            text-align: left;
+        }
+
+        .arch-label {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            margin-bottom: 1rem;
+            font-size: 0.625rem;
+            font-weight: 700;
+            letter-spacing: 0.1em;
+            color: var(--indigo-600);
+            text-transform: uppercase;
+            background-color: var(--indigo-50);
+            border-radius: 9999px;
+        }
+
+        .arch-title {
+            font-size: 2.25rem;
+            font-weight: 900;
+            margin-bottom: 1.5rem;
+            letter-spacing: -0.025em;
+        }
+
+        .arch-desc {
+            color: var(--slate-600);
+            margin-bottom: 2rem;
+            line-height: 1.625;
+        }
+
+        .arch-list li {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            font-weight: 600;
+            color: var(--slate-700);
+            margin-bottom: 1rem;
+        }
+
+        .arch-list li.arch-faded {
+            color: var(--slate-400);
+            font-style: italic;
+        }
+
+        .arch-icon {
+            width: 1.5rem;
+            height: 1.5rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+        }
+
+        .arch-icon.green {
+            background-color: var(--green-50);
+            color: var(--green-500);
+        }
+
+        .arch-icon.indigo {
+            background-color: var(--indigo-50);
+            color: var(--indigo-500);
+        }
+
+        /* Code Window */
+        .code-window {
+            background-color: var(--black);
+            padding: 2rem;
+            border-radius: 1.5rem;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+            border: 1px solid var(--slate-800);
+            transform: rotate(0deg);
+            transition: transform 0.5s;
+        }
+
+        @media (min-width: 768px) {
+            .code-window {
+                transform: rotate(2deg);
+            }
+            .code-window:hover {
+                transform: rotate(0deg);
+            }
+        }
+
+        .code-header {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin-bottom: 1.5rem;
+            padding-bottom: 1rem;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .mac-btn {
+            width: 0.75rem;
+            height: 0.75rem;
+            border-radius: 50%;
+        }
+
+        .mac-red { background-color: var(--red-500); }
+        .mac-amber { background-color: var(--amber-500); }
+        .mac-green { background-color: var(--emerald-500); }
+
+        .code-title {
+            color: var(--slate-500);
+            font-size: 0.625rem;
+            font-family: monospace;
+            margin-left: 0.5rem;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            font-weight: 900;
+        }
+
+        .code-content {
+            font-size: 1rem;
+            font-family: monospace;
+            line-height: 1.625;
+            display: block;
+            font-weight: 700;
+            letter-spacing: -0.025em;
+        }
+
+        .text-cyan-400 { color: var(--cyan-400); }
+        .text-white { color: var(--white); }
+        .text-lime-400 { color: var(--lime-400); }
+        .text-amber-400 { color: var(--amber-400); }
+        .text-slate-600 { color: var(--slate-600); }
+        .font-medium { font-weight: 500; }
+        .italic { font-style: italic; }
+
+        /* Pricing Section */
+        .pricing-header {
+            text-align: center;
+            margin-bottom: 4rem;
+        }
+
+        .pricing-header h2 {
+            font-size: 2.25rem;
+            font-weight: 900;
+            margin-bottom: 1rem;
+        }
+
+        .pricing-header p {
+            color: var(--slate-500);
+        }
+
+        .pricing-grid {
+            display: grid;
+            gap: 2rem;
+        }
+
+        @media (min-width: 768px) {
+            .pricing-grid {
+                grid-template-columns: repeat(3, 1fr);
+            }
+        }
+
+        .pricing-card {
+            padding: 2rem;
+            background-color: var(--white);
+            border-radius: 1.5rem;
+            border: 1px solid var(--slate-100);
+            box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+            display: flex;
+            flex-direction: column;
+            transition: box-shadow 0.3s;
+        }
+
+        .pricing-card:hover {
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        }
+
+        .pricing-card.featured {
+            border: 2px solid var(--indigo-600);
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
+            position: relative;
+            transform: scale(1);
+            z-index: 10;
+        }
+
+        @media (min-width: 768px) {
+            .pricing-card.featured {
+                transform: scale(1.05);
+            }
+        }
+
+        .featured-badge {
+            position: absolute;
+            top: -0.75rem;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: var(--indigo-600);
+            color: var(--white);
+            font-size: 0.625rem;
+            font-weight: 900;
+            padding: 0.25rem 1rem;
+            border-radius: 9999px;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+        }
+
+        .pricing-card h3 {
+            font-size: 1.25rem;
+            font-weight: 700;
+            margin-bottom: 0.5rem;
+        }
+
+        .pricing-desc {
+            color: var(--slate-500);
+            font-size: 0.875rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .pricing-price {
+            margin-bottom: 1.5rem;
+        }
+
+        .pricing-amount {
+            font-size: 2.25rem;
+            font-weight: 900;
+        }
+
+        .pricing-period {
+            color: var(--slate-400);
+        }
+
+        .pricing-features {
+            font-size: 0.875rem;
+            color: var(--slate-600);
+            margin-bottom: 2rem;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+        }
+
+        /* Founder Section */
+        .founder-grid {
+            display: grid;
+            gap: 3rem;
+        }
+
+        @media (min-width: 768px) {
+            .founder-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+
+        .founder-card-dark {
+            background-color: var(--slate-900);
+            padding: 2.5rem;
+            border-radius: 1.5rem;
+            border: 1px solid rgba(99, 102, 241, 0.3);
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+            position: relative;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .founder-corner-badge {
+            position: absolute;
+            top: 0;
+            right: 0;
+            background-color: var(--indigo-600);
+            color: var(--white);
+            font-size: 0.625rem;
+            font-weight: 900;
+            padding: 0.25rem 2.5rem;
+            transform: rotate(45deg) translate(2rem, -0.5rem);
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+        }
+
+        .founder-kicker {
+            color: var(--indigo-400);
+            font-size: 0.75rem;
+            font-weight: 900;
+            text-transform: uppercase;
+            letter-spacing: 0.3em;
+            margin-bottom: 1rem;
+        }
+
+        .founder-card-dark h3 {
+            font-size: 1.875rem;
+            font-weight: 900;
+            color: var(--white);
+            margin-bottom: 1rem;
+        }
+
+        .founder-card-dark p {
+            color: var(--slate-400);
+            line-height: 1.625;
+            margin-bottom: 2rem;
+        }
+
+        .founder-list {
+            margin-bottom: 2.5rem;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        .founder-list li {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            color: var(--white);
+            font-weight: 700;
+        }
+
+        .founder-list li.faded {
+            color: rgba(199, 210, 254, 0.7);
+        }
+
+        .founder-list span {
+            color: var(--indigo-400);
+            font-size: 1.25rem;
+        }
+
+        .btn-founder-block {
+            display: block;
+            width: 100%;
+            background-color: var(--indigo-600);
+            color: var(--white);
+            text-align: center;
+            padding: 1rem;
+            border-radius: 1rem;
+            font-weight: 900;
+            transition: background-color 0.3s;
+            box-shadow: 0 20px 25px -5px rgba(99, 102, 241, 0.2);
+            margin-top: auto;
+        }
+
+        .btn-founder-block:hover {
+            background-color: var(--indigo-700);
+        }
+
+        .founder-card-light {
+            background-color: var(--white);
+            padding: 2.5rem;
+            border-radius: 1.5rem;
+            border: 1px solid var(--slate-100);
+            box-shadow: 0 20px 25px -5px rgba(226, 232, 240, 0.5);
+            display: flex;
+            flex-direction: column;
+        }
+
+        .founder-kicker-light {
+            color: var(--indigo-600);
+            font-size: 0.875rem;
+            font-weight: 900;
+            text-transform: uppercase;
+            letter-spacing: 0.2em;
+            margin-bottom: 1rem;
+        }
+
+        .founder-card-light h3 {
+            font-size: 1.875rem;
+            font-weight: 900;
+            color: var(--slate-950);
+            margin-bottom: 1rem;
+        }
+
+        .founder-card-light p {
+            color: var(--slate-500);
+            line-height: 1.625;
+            margin-bottom: 2rem;
+        }
+
+        .standard-benefit {
+            padding: 1rem;
+            background-color: var(--slate-50);
+            border-radius: 1rem;
+            border: 1px solid var(--slate-100);
+            margin-bottom: 1rem;
+        }
+
+        .benefit-kicker {
+            font-size: 0.75rem;
+            color: var(--slate-400);
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 0.25rem;
+        }
+
+        .benefit-desc {
+            font-size: 0.875rem;
+            color: var(--slate-700);
+            font-weight: 500;
+        }
+
+        .btn-disabled {
+            width: 100%;
+            background-color: var(--slate-100);
+            color: var(--slate-400);
+            padding: 1rem;
+            border-radius: 1rem;
+            font-weight: 700;
+            cursor: not-allowed;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        /* Footer */
+        .footer {
+            text-align: center;
+            padding: 5rem 1.5rem;
+        }
+
+        .powered-by {
+            opacity: 0.4;
+            filter: grayscale(100%);
+            transition: all 0.3s;
+            margin-bottom: 2rem;
+        }
+
+        .powered-by:hover {
+            opacity: 1;
+            filter: grayscale(0%);
+        }
+
+        .powered-kicker {
+            font-size: 0.75rem;
+            font-weight: 900;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: var(--slate-400);
+            margin-bottom: 1rem;
+        }
+
+        .powered-brand {
+            font-size: 1.5rem;
+            font-weight: 700;
+            font-style: italic;
+            color: var(--slate-700);
+        }
+
+        .footer-copy {
+            font-size: 0.875rem;
+            color: var(--slate-400);
+            margin-bottom: 0.5rem;
+        }
+
+        .footer-copy a, .footer-credit a {
+            font-weight: 700;
+            color: var(--indigo-500);
+        }
+
+        .footer-copy a:hover, .footer-credit a:hover {
+            text-decoration: underline;
+        }
+
+        .footer-credit {
+            font-size: 0.875rem;
+            color: var(--slate-500);
+        }
+
+        /* Modal */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background-color: rgba(2, 6, 23, 0.6);
+            backdrop-filter: blur(12px);
+            align-items: center;
+            justify-content: center;
+            padding: 1.5rem;
+            z-index: 50;
+        }
+
+        .modal-overlay.active {
+            display: flex;
+        }
+
+        .modal-card {
+            background-color: var(--white);
+            padding: 2.5rem;
+            border-radius: 1.5rem;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+            width: 100%;
+            max-width: 28rem;
+            position: relative;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .modal-close {
+            position: absolute;
+            top: 1.5rem;
+            right: 1.5rem;
+            color: var(--slate-400);
+            font-size: 1.25rem;
+            font-weight: 700;
+            transition: color 0.3s;
+        }
+
+        .modal-close:hover {
+            color: var(--slate-900);
+        }
+
+        .modal-header {
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+
+        .modal-brand {
+            font-size: 1.875rem;
+            font-weight: 900;
+            color: var(--indigo-600);
+            text-transform: uppercase;
+            letter-spacing: -0.05em;
+        }
+
+        .modal-brand span {
+            color: var(--indigo-300);
+            font-size: 1.5rem;
+        }
+
+        .modal-subtitle {
+            font-size: 0.75rem;
+            font-weight: 700;
+            color: var(--slate-400);
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            margin-top: 0.25rem;
+        }
+
+        .form-group {
+            margin-bottom: 1rem;
+        }
+
+        .form-label {
+            display: block;
+            font-size: 0.75rem;
+            font-weight: 700;
+            color: var(--slate-400);
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            margin-bottom: 0.5rem;
+            margin-left: 0.25rem;
+        }
+
+        .form-input {
+            width: 100%;
+            padding: 1rem;
+            background-color: var(--slate-50);
+            border: 1px solid var(--slate-200);
+            border-radius: 1rem;
+            outline: none;
+            transition: all 0.3s;
+            font-family: inherit;
+            font-size: 1rem;
+        }
+
+        .form-input:focus {
+            border-color: var(--indigo-500);
+            background-color: var(--white);
+            box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
+        }
+
+        .btn-submit {
+            width: 100%;
+            background-color: var(--indigo-600);
+            color: var(--white);
+            padding: 1rem;
+            border-radius: 1rem;
+            font-weight: 900;
+            box-shadow: 0 20px 25px -5px rgba(224, 231, 255, 1);
+            transition: all 0.3s;
+            margin-top: 1rem;
+        }
+
+        .btn-submit:hover {
+            background-color: var(--indigo-700);
+        }
+
+        .btn-submit:active {
+            transform: scale(0.98);
+        }
+    </style>
+</head>
+<body>
+
+    <div id="landing-view">
+        <nav class="container nav-header">
+           <div class="nav-brand-group">
+                <img src="Logo.png" alt="FLOURish Logo" style="height: 2rem; width: auto;">
+                <div class="nav-brand">FLOURish™<span>.</span></div>
+                <span class="coming-soon-badge">Founder's Alpha</span>
+            </div>
+            <div class="nav-actions">
+                <button onclick="toggleLogin(true)" class="login-btn-nav">
+                    Tenant Login
+                </button>
+                <a href="#founder-section" class="btn-founder">
+                    Become a Founder
+                </a>
+            </div>
+        </nav>
+
+        <header class="container hero">
+            <h1>
+                We needed a <span class="gradient-text">name.</span><br>
+                You needed a <span class="text-indigo-600">bakery.</span>
+            </h1>
+            
+            <p class="hero-subtitle">
+                The high-performance operating system for artisan bakers. 
+                Automatically calculate true FIFO margins, manage daily batch logic, and keep your secret recipes strictly yours.
+            </p>
+            
+            <div class="hero-cta-wrapper">
+                <a href="#founder-section" class="btn-legacy">
+                    ☕ Unlock the Founder's Legacy Rate
+                </a>
+                <p class="waitlist-text">Public Waitlist Opens Soon</p>
+            </div>
+        </header>
+
+        <section class="stat-section">
+            <div class="stat-card">
+                <div class="stat-bg-number">
+                    <span>12%</span>
+                </div>
+                <div class="stat-content">
+                    <h2>
+                        Most bakeries lose 12% of their margin to unrecorded waste and volatile ingredient costs.
+                    </h2>
+                    <p>
+                        We built the engine that tracks every gram and every cent, giving you total visibility over your artisanal operations.
+                    </p>
+                </div>
+            </div>
+        </section>
+
+        <section id="features" class="container section-py border-t">
+            <div class="features-grid">
+                <div class="feature-card">
+                    <div class="feature-icon">📦</div>
+                    <h3>FIFO Lot Tracking</h3>
+                    <p>Most POS systems guess your margins. We calculate them based on the exact price of the flour used in today's batch.</p>
+                </div>
+                
+                <div class="feature-card">
+                    <div class="feature-icon">🥐</div>
+                    <h3>Production Pipeline</h3>
+                    <p>Transform raw ingredients into finished goods. FLOURish handles inventory deduction and labor allocation automatically.</p>
+                </div>
+
+                <div class="feature-card">
+                    <div class="feature-icon">🔐</div>
+                    <h3>Enterprise Security</h3>
+                    <p>Multi-tenant isolation and encrypted sessions. Built with security-first protocols for artisan data protection.</p>
+                </div>
+            </div>
+        </section>
+
+        <section class="container section-py border-t">
+            <div class="arch-grid">
+                <div class="arch-content">
+                    <div class="arch-label">
+                        Architecture
+                    </div>
+                    <h2 class="arch-title">Security by design.</h2>
+                    <p class="arch-desc">Artisan work deserves professional protection. Our core engine uses row-level logical isolation to ensure that your recipes, costs, and customer data never leak.</p>
+                    <ul class="arch-list">
+                        <li>
+                            <span class="arch-icon green">✓</span> 
+                            Identity-Based Access Control
+                        </li>
+                        <li>
+                            <span class="arch-icon green">✓</span> 
+                            FIFO Costing Logic
+                        </li>
+                        <li class="arch-faded">
+                            <span class="arch-icon indigo">→</span> 
+                            Automated Financial Auditing
+                        </li>
+                    </ul>
+                </div>
+                <div class="code-window">
+                    <div class="code-header">
+                        <div class="mac-btn mac-red"></div>
+                        <div class="mac-btn mac-amber"></div>
+                        <div class="mac-btn mac-green"></div>
+                        <span class="code-title">security_engine.py</span>
+                    </div>
+                    <code class="code-content" style="color: #f8fafc;">
+                        <span class="text-cyan-400">@router</span>.<span class="text-white">get</span>(<span class="text-lime-400">"/inventory/{lot_id}"</span>)<br>
+                        <span class="text-amber-400">def</span> <span class="text-white">get_secure_lot</span>(lot_id: <span class="text-cyan-400">int</span>):<br>
+                        <span class="text-slate-600 font-medium italic">&nbsp;&nbsp;# Row-Level Security check</span><br>
+                        &nbsp;&nbsp;<span class="text-amber-400">return</span> <span class="text-white">db.query(models.Lot).filter(</span><br>
+                        &nbsp;&nbsp;&nbsp;&nbsp;<span class="text-white">models.Lot.id == lot_id,</span><br>
+                        &nbsp;&nbsp;&nbsp;&nbsp;<span class="text-white">models.Lot.tenant_id == user.tenant_id</span><br>
+                        &nbsp;&nbsp;<span class="text-white">).first()</span>
+                    </code>
+                </div>
+            </div>
+        </section>
+
+        <section id="pricing" class="container section-py border-t">
+            <div class="pricing-header">
+                <h2>Pricing that grows with your dough.</h2>
+                <p>Lock in your Legacy Rate today and never pay full price.</p>
+            </div>
+
+            <div class="pricing-grid">
+                <div class="pricing-card">
+                    <h3>Cottage</h3>
+                    <p class="pricing-desc">For the cottage baker perfecting their craft.</p>
+                    <div class="pricing-price">
+                        <span class="pricing-amount">$19.99</span><span class="pricing-period">/mo</span>
+                    </div>
+                    <ul class="pricing-features">
+                        <li>✓ Full FIFO Engine</li>
+                        <li>✓ Batch Transformation</li>
+                        <li>✓ Single User</li>
+                    </ul>
+                </div>
+
+                <div class="pricing-card featured">
+                    <div class="featured-badge">Most Popular</div>
+                    <h3>Artisan</h3>
+                    <p class="pricing-desc">For established shops scaling their production.</p>
+                    <div class="pricing-price">
+                        <span class="pricing-amount">$49.99</span><span class="pricing-period">/mo</span>
+                    </div>
+                    <ul class="pricing-features">
+                        <li>✓ Everything in Cottage</li>
+                        <li>✓ Up to 5 Staff Users</li>
+                        <li>✓ Waste & Margin Analytics</li>
+                        <li>✓ Custom Order Pipeline</li>
+                    </ul>
+                </div>
+
+                <div class="pricing-card">
+                    <h3>Commercial</h3>
+                    <p class="pricing-desc">For wholesale and multi-location operations.</p>
+                    <div class="pricing-price">
+                        <span class="pricing-amount">$99.99</span><span class="pricing-period">/mo</span>
+                    </div>
+                    <ul class="pricing-features">
+                        <li>✓ Everything in Artisan</li>
+                        <li>✓ Unlimited Users</li>
+                        <li>✓ Advanced Security Auditing</li>
+                        <li>✓ Wholesale Logistics</li>
+                    </ul>
+                </div>
+            </div>
+        </section>
+
+        <section id="founder-section" class="container section-py border-t">
+            <div class="founder-grid">
+                
+                <div class="founder-card-dark">
+                    <div class="founder-corner-badge">
+                        Founder
+                    </div>
+                    
+                    <div class="founder-kicker">The Founders' Circle</div>
+                    <h3>Back the Build.</h3>
+                    <p>
+                        Support our development on Ko-fi to unlock the ultimate head-start for your bakery. Your contribution directly funds our secure infrastructure.
+                    </p>
+                    
+                    <ul class="founder-list">
+                        <li>
+                            <span>✓</span> 1.5 Years Total Free Access
+                        </li>
+                        <li>
+                            <span>✓</span> Permanent 15% Legacy Discount
+                        </li>
+                        <li class="faded">
+                            <span>✓</span> Early Access to New Features
+                        </li>
+                    </ul>
+
+                    <a href="https://ko-fi.com/W7W71JPCKI/shop" target="_blank" class="btn-founder-block">
+                        Become a Founder
+                    </a>
+                </div>
+
+                <div class="founder-card-light">
+                    <div class="founder-kicker-light">For New Tenants</div>
+                    <h3>Get your feet on the ground.</h3>
+                    <p>
+                        Starting or scaling a bakery is hard enough. Every new tenant on FLOURish gets their <b>first 3 months completely free</b>. 
+                    </p>
+                    
+                    <div style="margin-top: auto;">
+                        <div class="standard-benefit">
+                            <p class="benefit-kicker">Standard Benefit</p>
+                            <p class="benefit-desc">No credit card required to start. Perfect your crumb and build your community first.</p>
+                        </div>
+                        <button class="btn-disabled">
+                            Waitlist Opening Soon
+                        </button>
+                    </div>
+                </div>
+
+            </div>
+        </section>
+
+        <footer class="container footer border-t">
+            <div class="powered-by">
+                <p class="powered-kicker">Proudly Powering</p>
+                <h2 class="powered-brand">"Baked with Love by Jackie"</h2>
+            </div>
+            <p class="footer-copy">
+                &copy; 2026 FLOURish™ by <a href="https://knead.name">knead.name</a>.
+            </p>
+            <p class="footer-credit">
+                Built with precision by <a href="https://www.linkedin.com/in/tythomasson/">Ty Thomasson</a>.
+            </p>
+        </footer>
+    </div>
+    
+    <div id="login-view" class="modal-overlay">
+        <div class="modal-card">
+            <button onclick="toggleLogin(false)" class="modal-close">✕</button>
+            <div class="modal-header">
+                <h2 class="modal-brand">FLOURish™<span>.</span></h2>
+                <p class="modal-subtitle">Tenant Portal</p>
+            </div>
+            <form id="login-form">
+                <div class="form-group">
+                    <label class="form-label">Username</label>
+                    <input type="text" id="username" class="form-input" placeholder="baker_one" required>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Password</label>
+                    <input type="password" id="password" class="form-input" placeholder="••••••••" required>
+                </div>
+                <button type="submit" class="btn-submit">
+                    Open the Bakery
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        function toggleLogin(show) {
+            const loginView = document.getElementById('login-view');
+            if (show) {
+                loginView.classList.add('active');
+            } else {
+                loginView.classList.remove('active');
+            }
+        }
+    </script>
+</body>
+</html>

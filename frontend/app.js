@@ -83,7 +83,7 @@ async function fetchUserInfo() {
         const data = await res.json();
         
         // Inject the bakery name and user info into the sidebar
-        document.getElementById('bakery-name-display').textContent = data.business_name;
+        document.getElementById('tenant-name-display').innerText = data.business_name;
         document.getElementById('user-role-display').textContent = `User: ${data.username} (${data.role})`;
     } catch (err) {
         console.error("Failed to fetch user info:", err);
@@ -475,12 +475,34 @@ async function fetchOrders() {
                 <td class="p-2 border-b">${new Date(order.delivery_date).toLocaleDateString()}</td>
                 <td class="p-2 border-b">
                     <span class="px-2 py-1 bg-yellow-100 text-yellow-800 text-xs rounded-full font-bold">
-                        ${order.status}
+                        <select onchange="updateOrderStatus(${order.id}, this.value)" class="p-1 border rounded text-xs font-bold">
+                            <option value="Quote Pending" ${order.status === 'Quote Pending' ? 'selected' : ''}>Quote Pending</option>
+                            <option value="Deposit Paid" ${order.status === 'Deposit Paid' ? 'selected' : ''}>Deposit Paid</option>
+                            <option value="Baking Scheduled" ${order.status === 'Baking Scheduled' ? 'selected' : ''}>Baking Scheduled</option>
+                            <option value="Ready for Pickup" ${order.status === 'Ready for Pickup' ? 'selected' : ''}>Ready for Pickup</option>
+                            <option value="Completed" ${order.status === 'Completed' ? 'selected' : ''}>Completed</option>
+                            <option value="Cancelled" ${order.status === 'Cancelled' ? 'selected' : ''}>Cancelled</option>
+                        </select>
                     </span>
                 </td>
             </tr>
         `).join('');
     } catch (err) { console.error(err); }
+}
+
+async function updateOrderStatus(orderId, newStatus) {
+    try {
+        const res = await fetch(`${API_URL}/orders/${orderId}/update-pipeline`, {
+            method: 'PUT',
+            headers: getHeaders(),
+            body: JSON.stringify({ status: newStatus })
+        });
+        if (!res.ok) throw await res.json();
+        alert("Status updated!");
+        fetchOrders(); // Refresh the list
+    } catch (err) {
+        alert("Failed to update status: " + (err.detail || "Error"));
+    }
 }
 
 async function logWaste(lotId) {
