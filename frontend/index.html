@@ -58,6 +58,7 @@
             <nav class="flex-1 p-4 space-y-2">
                 <button onclick="showSection('inventory')" class="w-full text-left p-2 hover:bg-indigo-800 rounded">📦 Inventory</button>
                 <button onclick="showSection('products')" class="w-full text-left p-2 hover:bg-indigo-800 rounded">🥐 Products & POS</button>
+                <button onclick="showSection('prep-list')" class="w-full text-left p-2 hover:bg-indigo-800 rounded">📋 Daily Prep List</button>
                 <button onclick="showSection('orders')" class="w-full text-left p-2 hover:bg-indigo-800 rounded">📋 Custom Orders</button>
                 <button onclick="showSection('finances')" class="w-full text-left p-2 hover:bg-indigo-800 rounded">💰 Finances</button>
                 <button onclick="showSection('transactions')" class="text-left p-2 hover:bg-indigo-800 rounded">📖 Ledger</button>
@@ -167,6 +168,56 @@
                     </div>
                     <div id="sale-alert" class="hidden mb-4 p-4 rounded text-white font-bold text-center"></div>
                     <div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-6" id="products-grid"></div>
+                </div>
+            </section>
+
+           <section id="section-prep-list" class="hidden space-y-6">
+                <div class="flex justify-between items-center">
+                    <div>
+                        <h2 class="text-3xl font-bold">Daily Bake Schedule</h2>
+                        <p class="text-sm text-gray-500 mt-1">Aggregated retail par levels, custom orders, and planned batches.</p>
+                    </div>
+                    <button onclick="fetchPrepList()" class="bg-blue-500 text-white px-4 py-2 rounded font-bold shadow hover:bg-blue-600 transition">
+                        Refresh List
+                    </button>
+                </div>
+
+                <div class="bg-white border rounded shadow p-4">
+                    <h3 class="font-bold text-lg mb-4">Schedule a Manual Batch</h3>
+                    <form id="schedule-batch-form" class="space-y-4">
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div>
+                                <label class="block text-sm font-medium">Product ID</label>
+                                <input type="number" id="plan-prod-id" class="w-full p-2 border rounded" placeholder="e.g. 1" required>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium">Quantity to Bake</label>
+                                <input type="number" id="plan-qty" class="w-full p-2 border rounded" placeholder="e.g. 50" required>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium">Scheduled Date</label>
+                                <input type="date" id="plan-date" class="w-full p-2 border rounded" required>
+                            </div>
+                        </div>
+                        <button type="submit" class="bg-indigo-600 text-white px-4 py-2 rounded hover:bg-indigo-700 w-full font-bold">Schedule Batch</button>
+                    </form>
+                </div>
+                
+                <div class="bg-white border rounded shadow overflow-hidden">
+                    <table class="w-full text-left border-collapse">
+                        <thead>
+                            <tr class="bg-gray-100 text-sm uppercase tracking-wider text-gray-600">
+                                <th class="p-4 border-b font-bold">Product Name</th>
+                                <th class="p-4 border-b text-center font-bold">Retail Par Needed</th>
+                                <th class="p-4 border-b text-center font-bold">Custom Orders</th>
+                                <th class="p-4 border-b text-center font-bold text-blue-600">Planned Batches</th> 
+                                <th class="p-4 border-b text-center font-black text-indigo-700">Total to Bake</th>
+                                <th class="p-4 border-b text-right font-bold">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="prep-list-table-body" class="text-sm divide-y divide-gray-100">
+                            </tbody>
+                    </table>
                 </div>
             </section>
 

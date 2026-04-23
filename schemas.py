@@ -11,6 +11,11 @@ class RecipeItemCreate(BaseModel):
     quantity_required: float
     is_non_food: bool = False
 
+class PlannedBatchCreate(BaseModel):
+    product_id: int
+    planned_quantity: int
+    scheduled_date: datetime
+    
 class ProductCreate(BaseModel):
     name: str
     retail_price: float
@@ -177,6 +182,22 @@ class OverheadCreate(OverheadBase):
 class OverheadResponse(OverheadBase):
     id: int
     tenant_id: int
+
+    class Config:
+        from_attributes = True
+
+class PlannedBatchCreate(BaseModel):
+    product_id: int
+    planned_quantity: int
+    scheduled_date: datetime
+
+class PrepListItem(BaseModel):
+    product_id: int
+    product_name: str
+    retail_par_needed: int
+    custom_order_needed: int
+    planned_batch_needed: int 
+    total_to_bake: int
 
     class Config:
         from_attributes = True

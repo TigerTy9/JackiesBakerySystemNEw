@@ -225,3 +225,31 @@ class LaborLog(Base):
     hours_spent = Column(Float)
     hourly_rate = Column(Float) # The wage of the baker for this specific batch
     total_labor_cost = Column(Float) # Calculated as hours * rate
+
+class ProductParLevel(Base):
+    """Target daily stock levels for standard retail items."""
+    __tablename__ = "product_par_levels"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id"))
+    product_id = Column(Integer, ForeignKey("products.id"), unique=True)
+    
+    target_quantity = Column(Integer, default=0) # Amount needed at start of day
+    
+    tenant = relationship("Tenant")
+    product = relationship("Product")
+
+class PlannedBatch(Base):
+    """Allows bakers to manually schedule one-off production runs for specific dates."""
+    __tablename__ = "planned_batches"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id"))
+    product_id = Column(Integer, ForeignKey("products.id"))
+    
+    planned_quantity = Column(Integer)
+    scheduled_date = Column(DateTime) # The day this needs to show up on the Prep List
+    is_completed = Column(Boolean, default=False)
+    
+    tenant = relationship("Tenant")
+    product = relationship("Product")

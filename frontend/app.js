@@ -73,6 +73,7 @@ function showSection(sectionId) {
         fetchOverheadExpenses();
     }
     if (sectionId === 'transactions') fetchTransactionHistory();
+    if (sectionId === 'prep-list') fetchPrepList();
 }
 
 async function fetchUserInfo() {
@@ -631,3 +632,74 @@ async function deleteExpense(id) {
         console.error("Delete failed:", err);
     }
 }
+
+async function fetchPrepList() {
+    try {
+        const res = await fetch(`${API_URL}/production/prep-list`, { headers: getHeaders() });
+        if (res.status === 401) return logout();
+        
+        const list = await res.json();
+        const tbody = document.getElementById('prep-list-table-body');
+        
+        // Handle empty state (everything is baked!)
+        if (list.length === 0) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="6" class="p-8 text-center text-gray-400 font-medium italic">
+                        🎉 All prep targets met! No baking required at this time.
+                    </td>
+                </tr>`;
+            return;
+        }
+
+        // Render the rows
+        tbody.innerHTML = list.map(item => `
+            <tr class="hover:bg-gray-50 transition">
+                <td class="p-4 font-bold text-lg text-gray-800">${item.product_name}</td>
+                <td class="p-4 text-center text-gray-500 font-medium">${item.retail_par_needed}</td>
+                <td class="p-4 text-center text-orange-500 font-bold">${item.custom_order_needed}</td>
+                <td class="p-4 text-center text-blue-600 font-bold">${item.planned_batch_needed}</td> <td class="p-4 text-center text-indigo-600 font-black text-2xl">${item.total_to_bake}</td>
+                <td class="p-4 text-right">
+                    <button onclick="showSection('products')" class="bg-indigo-50 text-indigo-600 border border-indigo-200 px-3 py-2 rounded text-xs font-bold hover:bg-indigo-600 hover:text-white transition shadow-sm">
+                        Go to Bake Screen
+                    </button>
+                </td>
+            </tr>
+        `).join('');
+        
+    } catch (err) { 
+        console.error("Failed to load prep list:", err); 
+    }
+}
+
+// Schedule a Manual Batch
+document.getElementById('schedule-batch-form')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    
+    const productId = document.getElementById('plan-prod-id').value;
+    const quantity = document.getElementById('plan-qty').value;
+    const rawDate = document.getElementById('plan-date').value;
+    
+    // Convert the date input (YYYY-MM-DD) into a valid ISO string for the backend
+    const isoDate = new Date(rawDate).toISOString();
+
+    try {
+        const res = await fetch(`${API_URL}/production/schedule-batch`, {
+            method: 'POST',
+            headers: getHeaders(),
+            body: JSON.stringify({
+                product_id: parseInt(productId),
+                planned_quantity: parseInt(quantity),
+                scheduled_date: isoDate
+            })
+        });
+
+        if (!res.ok) throw await res.json();
+        
+        alert("Batch scheduled successfully!");
+        e.target.reset();
+        fetchPrepList(); // Refresh the list to show the new math immediately
+    } catch (err) {
+        alert(err.detail || "Failed to schedule batch");
+    }
+});

@@ -1,4 +1,5 @@
 # utils.py
+import models
 
 def convert_to_base(quantity: float, from_unit: str, multiplier: float) -> float:
     """
