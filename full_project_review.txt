@@ -353,14 +353,13 @@ class TransactionLog(Base):
     id = Column(Integer, primary_key=True, index=True)
     tenant_id = Column(Integer, ForeignKey("tenants.id"))
     product_id = Column(Integer, ForeignKey("products.id"))
+    customer_name = Column(String, nullable=True) # NEW FIELD
     timestamp = Column(DateTime, default=datetime.utcnow)
     
     sale_price = Column(Float)
+    margin_fifo = Column(Float)
+    margin_newest = Column(Float)
     
-    # Storing historical margins at the exact moment of sale
-    margin_fifo = Column(Float) # Margin using oldest available inventory costs
-    margin_newest = Column(Float) # Margin using most recent purchase costs
-
 class UnitConversion(Base):
     __tablename__ = "unit_conversions"
     
@@ -992,9 +991,17 @@ def execute_production_run(
     return new_batch
 
 
-def record_finished_goods_sale(db: Session, product_id: int, tenant_id: int, quantity_sold: int, custom_revenue: float = None):
+def record_finished_goods_sale(
+    db: Session, 
+    product_id: int, 
+    tenant_id: int, 
+    quantity_sold: int, 
+    custom_revenue: float = None,
+    customer_name: str = "Retail Customer"  # NEW: Default for POS walk-ins
+):
     """
     2. THE SALE: Deducts from baked inventory and logs the final financial transaction.
+    Now captures customer names for the Ledger.
     """
     product = db.query(models.Product).filter(models.Product.id == product_id).first()
     
@@ -1003,9 +1010,10 @@ def record_finished_goods_sale(db: Session, product_id: int, tenant_id: int, qua
     total_newest_cost = 0.0
     
     while remaining_to_sell > 0:
-        # Find the oldest batch of baked goods sitting on the counter
+        # Find the oldest batch of baked goods sitting on the counter (FIFO)
         oldest_batch = db.query(models.FinishedGoodsLot)\
             .filter(models.FinishedGoodsLot.product_id == product_id,
+                    models.FinishedGoodsLot.tenant_id == tenant_id, # Added tenant safety
                     models.FinishedGoodsLot.is_depleted == False)\
             .order_by(models.FinishedGoodsLot.production_date).first()
             
@@ -1027,15 +1035,17 @@ def record_finished_goods_sale(db: Session, product_id: int, tenant_id: int, qua
         db.flush()
 
     # Calculate final margins and log the sale 
-    # UPDATED: Use custom_revenue if provided, otherwise fallback to retail price
+    # Use custom_revenue (from Orders) if provided, otherwise fallback to standard Retail Price
     total_revenue = custom_revenue if custom_revenue is not None else (product.retail_price * quantity_sold)
     
     margin_fifo = total_revenue - total_fifo_cost
     margin_newest = total_revenue - total_newest_cost
     
+    # NEW: The log now includes the customer_name field
     new_log = models.TransactionLog(
         tenant_id=tenant_id,
         product_id=product_id,
+        customer_name=customer_name, # LINKED TO NEW MODEL FIELD
         sale_price=total_revenue, 
         margin_fifo=margin_fifo,
         margin_newest=margin_newest
@@ -1458,8 +1468,12 @@ def update_order_pipeline(
             item_revenue = (item.price_override * item.quantity) if item.price_override is not None else None
             try:
                 crud.record_finished_goods_sale(
-                    db=db, product_id=item.product_id, tenant_id=current_user.tenant_id,
-                    quantity_sold=item.quantity, custom_revenue=item_revenue
+                    db=db, 
+                    product_id=item.product_id, 
+                    tenant_id=current_user.tenant_id,
+                    quantity_sold=item.quantity, 
+                    custom_revenue=item_revenue,
+                    customer_name=order.customer_name # PASS CUSTOMER NAME
                 )
             except Exception as e:
                 db.rollback()
@@ -1963,19 +1977,21 @@ def get_transaction_history(
     db: Session = Depends(get_tenant_db), 
     current_user: models.User = Depends(get_current_user)
 ):
-    # Join with Product table to get the name
+    # Join with Product table to get the name [cite: 200, 201]
     transactions = db.query(
         models.TransactionLog, 
         models.Product.name
     ).join(
-        models.Product, models.TransactionLog.product_id == models.Product.id
+        models.Product, 
+        models.TransactionLog.product_id == models.Product.id
     ).filter(
         models.TransactionLog.tenant_id == current_user.tenant_id
     ).order_by(models.TransactionLog.timestamp.desc()).all()
 
-    # Format the data for the frontend
+    # Format the data for the frontend, now including customer_name [cite: 201]
     return [{
         "timestamp": t[0].timestamp,
+        "customer_name": t[0].customer_name or "Retail", # NEW FIELD
         "product_name": t[1],
         "sale_price": t[0].sale_price,
         "margin_fifo": t[0].margin_fifo
@@ -4208,11 +4224,10 @@ FILE: frontend/index.html
                     <table class="w-full text-left border-collapse">
                         <thead>
                             <tr class="bg-gray-100 text-sm">
-                                <tr class="bg-gray-100 text-sm">
-                                    <th class="p-3 border-b">Date & Time</th>
-                                    <th class="p-3 border-b">Product Name</th> <th class="p-3 border-b">Revenue</th>
-                                    <th class="p-3 border-b">Net Margin (FIFO)</th>
-                                </tr>
+                                <th class="p-3 border-b">Date & Time</th>
+                                <th class="p-3 border-b">Customer</th> <th class="p-3 border-b">Product</th>
+                                <th class="p-3 border-b">Revenue</th>
+                                <th class="p-3 border-b">Margin</th>
                             </tr>
                         </thead>
                         <tbody id="transactions-table-body" class="text-sm"></tbody>
@@ -4859,14 +4874,13 @@ async function fetchTransactionHistory() {
         tbody.innerHTML = logs.map(log => `
             <tr class="hover:bg-gray-50">
                 <td class="p-3 border-b text-gray-500">${new Date(log.timestamp).toLocaleString()}</td>
+                <td class="p-3 border-b font-bold text-slate-700">${log.customer_name || 'Retail'}</td>
                 <td class="p-3 border-b font-medium text-indigo-700">${log.product_name}</td>
                 <td class="p-3 border-b text-green-600 font-bold">$${log.sale_price.toFixed(2)}</td>
                 <td class="p-3 border-b text-indigo-600">$${log.margin_fifo.toFixed(2)}</td>
             </tr>
         `).join('');
-    } catch (err) {
-        console.error("Failed to load transactions", err);
-    }
+    } catch (err) { console.error(err); }
 }
 
 async function fetchOverheadExpenses() {

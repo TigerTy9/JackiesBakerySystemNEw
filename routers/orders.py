@@ -78,8 +78,12 @@ def update_order_pipeline(
             item_revenue = (item.price_override * item.quantity) if item.price_override is not None else None
             try:
                 crud.record_finished_goods_sale(
-                    db=db, product_id=item.product_id, tenant_id=current_user.tenant_id,
-                    quantity_sold=item.quantity, custom_revenue=item_revenue
+                    db=db, 
+                    product_id=item.product_id, 
+                    tenant_id=current_user.tenant_id,
+                    quantity_sold=item.quantity, 
+                    custom_revenue=item_revenue,
+                    customer_name=order.customer_name # PASS CUSTOMER NAME
                 )
             except Exception as e:
                 db.rollback()

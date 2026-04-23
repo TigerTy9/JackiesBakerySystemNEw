@@ -109,9 +109,17 @@ def execute_production_run(
     return new_batch
 
 
-def record_finished_goods_sale(db: Session, product_id: int, tenant_id: int, quantity_sold: int, custom_revenue: float = None):
+def record_finished_goods_sale(
+    db: Session, 
+    product_id: int, 
+    tenant_id: int, 
+    quantity_sold: int, 
+    custom_revenue: float = None,
+    customer_name: str = "Retail Customer"  # NEW: Default for POS walk-ins
+):
     """
     2. THE SALE: Deducts from baked inventory and logs the final financial transaction.
+    Now captures customer names for the Ledger.
     """
     product = db.query(models.Product).filter(models.Product.id == product_id).first()
     
@@ -120,9 +128,10 @@ def record_finished_goods_sale(db: Session, product_id: int, tenant_id: int, qua
     total_newest_cost = 0.0
     
     while remaining_to_sell > 0:
-        # Find the oldest batch of baked goods sitting on the counter
+        # Find the oldest batch of baked goods sitting on the counter (FIFO)
         oldest_batch = db.query(models.FinishedGoodsLot)\
             .filter(models.FinishedGoodsLot.product_id == product_id,
+                    models.FinishedGoodsLot.tenant_id == tenant_id, # Added tenant safety
                     models.FinishedGoodsLot.is_depleted == False)\
             .order_by(models.FinishedGoodsLot.production_date).first()
             
@@ -144,15 +153,17 @@ def record_finished_goods_sale(db: Session, product_id: int, tenant_id: int, qua
         db.flush()
 
     # Calculate final margins and log the sale 
-    # UPDATED: Use custom_revenue if provided, otherwise fallback to retail price
+    # Use custom_revenue (from Orders) if provided, otherwise fallback to standard Retail Price
     total_revenue = custom_revenue if custom_revenue is not None else (product.retail_price * quantity_sold)
     
     margin_fifo = total_revenue - total_fifo_cost
     margin_newest = total_revenue - total_newest_cost
     
+    # NEW: The log now includes the customer_name field
     new_log = models.TransactionLog(
         tenant_id=tenant_id,
         product_id=product_id,
+        customer_name=customer_name, # LINKED TO NEW MODEL FIELD
         sale_price=total_revenue, 
         margin_fifo=margin_fifo,
         margin_newest=margin_newest

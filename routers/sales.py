@@ -106,19 +106,21 @@ def get_transaction_history(
     db: Session = Depends(get_tenant_db), 
     current_user: models.User = Depends(get_current_user)
 ):
-    # Join with Product table to get the name
+    # Join with Product table to get the name [cite: 200, 201]
     transactions = db.query(
         models.TransactionLog, 
         models.Product.name
     ).join(
-        models.Product, models.TransactionLog.product_id == models.Product.id
+        models.Product, 
+        models.TransactionLog.product_id == models.Product.id
     ).filter(
         models.TransactionLog.tenant_id == current_user.tenant_id
     ).order_by(models.TransactionLog.timestamp.desc()).all()
 
-    # Format the data for the frontend
+    # Format the data for the frontend, now including customer_name [cite: 201]
     return [{
         "timestamp": t[0].timestamp,
+        "customer_name": t[0].customer_name or "Retail", # NEW FIELD
         "product_name": t[1],
         "sale_price": t[0].sale_price,
         "margin_fifo": t[0].margin_fifo

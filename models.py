@@ -104,14 +104,13 @@ class TransactionLog(Base):
     id = Column(Integer, primary_key=True, index=True)
     tenant_id = Column(Integer, ForeignKey("tenants.id"))
     product_id = Column(Integer, ForeignKey("products.id"))
+    customer_name = Column(String, nullable=True) # NEW FIELD
     timestamp = Column(DateTime, default=datetime.utcnow)
     
     sale_price = Column(Float)
+    margin_fifo = Column(Float)
+    margin_newest = Column(Float)
     
-    # Storing historical margins at the exact moment of sale
-    margin_fifo = Column(Float) # Margin using oldest available inventory costs
-    margin_newest = Column(Float) # Margin using most recent purchase costs
-
 class UnitConversion(Base):
     __tablename__ = "unit_conversions"
     

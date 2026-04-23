@@ -619,14 +619,13 @@ async function fetchTransactionHistory() {
         tbody.innerHTML = logs.map(log => `
             <tr class="hover:bg-gray-50">
                 <td class="p-3 border-b text-gray-500">${new Date(log.timestamp).toLocaleString()}</td>
+                <td class="p-3 border-b font-bold text-slate-700">${log.customer_name || 'Retail'}</td>
                 <td class="p-3 border-b font-medium text-indigo-700">${log.product_name}</td>
                 <td class="p-3 border-b text-green-600 font-bold">$${log.sale_price.toFixed(2)}</td>
                 <td class="p-3 border-b text-indigo-600">$${log.margin_fifo.toFixed(2)}</td>
             </tr>
         `).join('');
-    } catch (err) {
-        console.error("Failed to load transactions", err);
-    }
+    } catch (err) { console.error(err); }
 }
 
 async function fetchOverheadExpenses() {
